@@ -10,7 +10,7 @@ const { getMCPServers, getSettings } = require('./lib/settings-parser');
 const { bootstrapTeamOS } = require('./lib/team-os-bootstrap');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- SSE ---
@@ -37,7 +37,13 @@ let _nativeSuppressed = false;
 
 // --- API ---
 function mergeProgressOverlay(km) {
-  if (!km?.progress?.agents || Object.keys(_progressOverlay).length === 0) return km;
+  if (Object.keys(_progressOverlay).length === 0) return km;
+
+  // Bootstrap progress structure if missing
+  if (!km) km = {};
+  if (!km.progress) km.progress = {};
+  if (!km.progress.agents) km.progress.agents = [];
+
   const now = Date.now();
   for (const agent of km.progress.agents) {
     const cleanName = (agent.agent || '').replace(/^@/, '');
@@ -50,6 +56,22 @@ function mergeProgressOverlay(km) {
       agent.updated = new Date(overlay.ts).toISOString();
     }
   }
+
+  // Inject overlay-only agents not present in the agents array
+  const existingNames = new Set(km.progress.agents.map(a => (a.agent || '').replace(/^@/, '')));
+  for (const [key, overlay] of Object.entries(_progressOverlay)) {
+    const cleanName = key.replace(/^@/, '');
+    if (!existingNames.has(cleanName) && (now - overlay.ts) < 600000) {
+      km.progress.agents.push({
+        agent: cleanName,
+        progress: overlay.progress,
+        task: overlay.task || '',
+        note: overlay.note || '',
+        updated: new Date(overlay.ts).toISOString(),
+      });
+    }
+  }
+
   return km;
 }
 
@@ -121,6 +143,7 @@ app.post('/api/session/clear', (_req, res) => {
   try {
     const cleared = clearArtifacts();
     _progressOverlay = {}; // Clear progress overlay on session clear
+    _hookActivity = {};   // Clear hook activity on session clear
     _nativeSuppressed = true; // Suppress native data until new team activity
     invalidateCache();
     broadcast('team_os_updated', { event: 'session_clear', file: 'artifacts' });
@@ -137,6 +160,11 @@ app.post('/api/progress', (req, res) => {
   res.set('Content-Type', 'application/json; charset=utf-8');
   const { agent, progress, task, note } = req.body;
   if (!agent) return res.status(400).json({ error: 'agent required' });
+
+  // Auto-unsuppress: progress push means active work is happening
+  if (_nativeSuppressed) {
+    _nativeSuppressed = false;
+  }
 
   _progressOverlay[agent] = {
     agent,
@@ -167,6 +195,76 @@ app.post('/api/progress/done', (_req, res) => {
   }
   broadcast('progress_push', { batch: true, allDone: true });
   res.json({ success: true, count: Object.keys(_progressOverlay).length });
+});
+
+// --- Claude Code HTTP Hooks Receiver ---
+let _hookActivity = {}; // session_id → { lastSeen, toolCount, lastTool }
+
+app.post('/hooks/event', (req, res) => {
+  const { hook_event_name, session_id, tool_name } = req.body;
+  const now = Date.now();
+
+  switch (hook_event_name) {
+    case 'PostToolUse': {
+      if (!_hookActivity[session_id]) {
+        _hookActivity[session_id] = { lastSeen: now, toolCount: 0, lastTool: '', _ttl: null };
+      }
+      const activity = _hookActivity[session_id];
+      activity.lastSeen = now;
+      activity.toolCount++;
+      activity.lastTool = tool_name || '';
+      // Reset TTL on each activity (auto-expire after 10 minutes of inactivity)
+      if (activity._ttl) clearTimeout(activity._ttl);
+      activity._ttl = setTimeout(() => { delete _hookActivity[session_id]; }, 600000);
+      broadcast('hook_activity', { session_id, tool_name, toolCount: activity.toolCount, ts: now });
+      break;
+    }
+
+    case 'SubagentStart': {
+      broadcast('hook_lifecycle', { event: 'agent_start', session_id, ...req.body, ts: now });
+      break;
+    }
+
+    case 'SubagentStop': {
+      broadcast('hook_lifecycle', { event: 'agent_stop', session_id, ...req.body, ts: now });
+      break;
+    }
+
+    case 'TeammateIdle': {
+      broadcast('hook_lifecycle', { event: 'teammate_idle', session_id, ...req.body, ts: now });
+      break;
+    }
+
+    case 'TaskCompleted': {
+      broadcast('hook_lifecycle', { event: 'task_completed', session_id, ...req.body, ts: now });
+      break;
+    }
+
+    case 'Stop': {
+      broadcast('hook_lifecycle', { event: 'session_stop', session_id, ts: now });
+      delete _hookActivity[session_id];
+      break;
+    }
+
+    default:
+      broadcast('hook_event', { event: hook_event_name, session_id, ts: now });
+  }
+
+  res.json({ ok: true });
+});
+
+app.get('/hooks/activity', (_req, res) => {
+  const sanitized = Object.fromEntries(
+    Object.entries(_hookActivity).map(([sessionId, activity]) => [
+      sessionId,
+      {
+        lastSeen: activity.lastSeen,
+        toolCount: activity.toolCount,
+        lastTool: activity.lastTool,
+      },
+    ])
+  );
+  res.json(sanitized);
 });
 
 // --- Browser Recovery API ---
@@ -255,7 +353,7 @@ app.get('/api/reports', (_req, res) => {
   try {
     if (!fs.existsSync(REPORTS_DIR)) return res.json([]);
     const files = fs.readdirSync(REPORTS_DIR)
-      .filter(f => f.endsWith('.json'))
+      .filter(f => f.endsWith('.json') && f !== '_pending.json')
       .map(f => {
         const filePath = path.join(REPORTS_DIR, f);
         try {
@@ -282,6 +380,7 @@ app.get('/api/reports', (_req, res) => {
 
 app.get('/api/reports/:id', (req, res) => {
   try {
+    if (req.params.id === '_pending') return res.status(404).json({ error: 'Report not found' });
     const filePath = path.join(REPORTS_DIR, `${req.params.id}.json`);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Report not found' });
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
