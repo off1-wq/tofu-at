@@ -10,7 +10,7 @@ const { getMCPServers, getSettings } = require('./lib/settings-parser');
 const { bootstrapTeamOS } = require('./lib/team-os-bootstrap');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- SSE ---
@@ -254,7 +254,17 @@ app.post('/hooks/event', (req, res) => {
 });
 
 app.get('/hooks/activity', (_req, res) => {
-  res.json(_hookActivity);
+  const sanitized = Object.fromEntries(
+    Object.entries(_hookActivity).map(([sessionId, activity]) => [
+      sessionId,
+      {
+        lastSeen: activity.lastSeen,
+        toolCount: activity.toolCount,
+        lastTool: activity.lastTool,
+      },
+    ])
+  );
+  res.json(sanitized);
 });
 
 // --- Browser Recovery API ---
@@ -343,7 +353,7 @@ app.get('/api/reports', (_req, res) => {
   try {
     if (!fs.existsSync(REPORTS_DIR)) return res.json([]);
     const files = fs.readdirSync(REPORTS_DIR)
-      .filter(f => f.endsWith('.json'))
+      .filter(f => f.endsWith('.json') && f !== '_pending.json')
       .map(f => {
         const filePath = path.join(REPORTS_DIR, f);
         try {
@@ -370,6 +380,7 @@ app.get('/api/reports', (_req, res) => {
 
 app.get('/api/reports/:id', (req, res) => {
   try {
+    if (req.params.id === '_pending') return res.status(404).json({ error: 'Report not found' });
     const filePath = path.join(REPORTS_DIR, `${req.params.id}.json`);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Report not found' });
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));

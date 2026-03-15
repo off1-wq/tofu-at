@@ -2,6 +2,29 @@
 
 ---
 
+## [2026-03-15] - Hook script path resolution fix
+
+### 수정 파일
+- `.claude/settings.local.json` — 6개 hook command를 절대경로로 변경
+- `.claude/migration/env-setup.sh` — settings.local.json 생성 템플릿을 `${AI_DIR}` 기반 절대경로로 변경
+- `agent-office/hooks/forward-event.js` — 사용 예시를 절대경로 기준으로 수정
+
+### 변경 내용
+- [Fixed]: Claude Code 세션의 현재 작업 디렉토리가 repo root가 아닐 때 `node agent-office/hooks/forward-event.js` 가 잘못된 상대경로로 해석되어 `MODULE_NOT_FOUND` 가 발생하던 문제
+- [Changed]: 모든 Agent Office hook command를 `/home/tofu/AI/agent-office/hooks/forward-event.js` 절대경로로 고정
+- [Changed]: 환경 재설정 스크립트가 이후 생성하는 settings.local.json도 `${AI_DIR}/agent-office/hooks/forward-event.js` 를 사용하도록 수정
+
+### 재현 및 검증
+- 재현: `cd /home/tofu/AI/skills-2.0-upgrade && printf '{}' | node agent-office/hooks/forward-event.js` → `MODULE_NOT_FOUND`
+- 검증: `cd /home/tofu/AI/skills-2.0-upgrade && printf '{}' | node /home/tofu/AI/agent-office/hooks/forward-event.js` → stderr 0 bytes, exit 0
+
+### 영향 범위
+- 영향받는 기능: PostToolUse, SubagentStart, SubagentStop, TeammateIdle, TaskCompleted, Stop hooks
+- 기존 동작 유지: Agent Office 미실행 시 silent exit(0) 동작 그대로 유지
+- 추가 수정: oversized hook payload 수용을 위해 JSON body limit를 5mb로 상향, `/hooks/activity` 응답에서 내부 `_ttl` 타이머 객체를 제거해 circular JSON 500 방지
+
+---
+
 ## [2026-02-28] - v3.7 (HTTP Hooks Integration + Timezone Auto-detect + Activity TTL)
 
 ### 수정 파일

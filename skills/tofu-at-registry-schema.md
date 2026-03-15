@@ -1,6 +1,7 @@
 ---
 name: tofu-at-registry-schema
-description: Team Registry YAML 스키마 정의 + environment 필드 + 검증 규칙 + 예시 3개. /tofu-at가 팀 템플릿을 생성/검증할 때 참조.
+description: Use when needing Team Registry YAML 스키마 정의 + environment 필드 + 검증 규칙 + 예시 3개. /tofu-at가 팀 템플릿을 생성/검증할 때 참조.
+disable-model-invocation: true
 ---
 
 # Team Registry YAML Schema
@@ -19,7 +20,7 @@ defaults:
   routing_policy:
     opus:
       use_for: ["architecture", "integration", "high-risk refactor", "consensus"]
-    sonnet:  # Sonnet 4.6 (v2.1.45+), sonnet[1m]으로 1M 컨텍스트 사용 가능
+    sonnet:  # Sonnet 4.6 (v2.1.45+), 기본 sonnet[1m] (1M 컨텍스트)
       use_for: ["implementation planning", "refactor steps", "tests", "scripts", "category coordination"]
     haiku:
       use_for: ["labeling", "classification", "triage", "small transforms"]
