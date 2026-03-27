@@ -7,7 +7,7 @@ allowedTools: Task, Read, Write, Bash, Glob, Grep, AskUserQuestion, TeamCreate, 
 
 > **Version**: 2.1.0
 > 기존/신규 워크플로우를 Agent Teams(Split Pane/Swarm)로 변환합니다.
-> 참조 스킬: `tofu-at-workflow.md`, `tofu-at-registry-schema.md`, `tofu-at-spawn-templates.md`, `tofu-at-presets.md`, `dynamic-gate-verification.md`, `pumasi-config-spec.md`, `prd-interview.md`, `prd-documents.md`
+> 참조 스킬: `tofu-at-workflow.md`, `tofu-at-registry-schema.md`, `tofu-at-spawn-templates/` (SKILL.md + references/), `tofu-at-presets.md`, `dynamic-gate-verification.md`, `pumasi-config-spec.md`, `prd-interview.md`, `prd-documents.md`
 
 $ARGUMENTS
 
@@ -1007,16 +1007,16 @@ AskUserQuestion 호출 — questions 배열에 1개 질문:
 ## STEP 5: 스폰 프롬프트 생성 (/prompt 파이프라인 내재화)
 
 **각 팀원별로 /prompt 파이프라인을 실행하여 고품질 스폰 프롬프트를 생성합니다.**
-**템플릿: `tofu-at-spawn-templates.md` 참조.**
-**전문가 DB: `tofu-at-spawn-templates.md` 섹션 7.5에 27도메인 137명 전문가 완전 내장.**
-**파이프라인 상세: `tofu-at-spawn-templates.md` 섹션 7.5 (내장 DB + 매핑) + 7.6 (서브스텝) 참조.**
+**템플릿: `tofu-at-spawn-templates/` 참조 (SKILL.md = 인덱스, references/ = 상세).**
+**전문가 DB: `tofu-at-spawn-templates/references/expert-db.md`에 27도메인 137명 전문가 완전 내장.**
+**파이프라인 상세: `tofu-at-spawn-templates/references/expert-db.md` (내장 DB + 매핑) + `references/ce-checklist.md` (서브스텝) 참조.**
 
 ### 실행 순서 (각 팀원에 대해 반복)
 
 ```
 FOR each role in registry.roles:
 
-  Step 5-0: Existing Agent Detection (NEW — tofu-at-spawn-templates.md §4.5 참조)
+  Step 5-0: Existing Agent Detection (NEW — tofu-at-spawn-templates/references/worker-templates.md §4.5 참조)
     IF role.source_agent OR role.suggested_source (STEP 3에서 확인됨):
       source_path = role.source_agent || role.suggested_source
       original_content = Read(source_path)
@@ -1054,7 +1054,7 @@ FOR each role in registry.roles:
     | lead, coordinator | 에이전트/자동화 |
 
   Step 5-2: Expert Domain Priming (Embedded DB)
-    1. tofu-at-spawn-templates.md §7.5의 내장 전문가 DB에서 domain 매칭
+    1. tofu-at-spawn-templates/references/expert-db.md의 내장 전문가 DB에서 domain 매칭
     2. domain 내 best-match expert 선택 (task 키워드 vs 전문가 핵심 용어)
     3. expert_name + expert_framework + domain_vocabulary 추출
     4. <role> 블록에 <domain_vocabulary> 주입
@@ -1075,7 +1075,7 @@ FOR each role in registry.roles:
     [ ] 긍정형 프레이밍: "~해라" 우선
     [ ] 테이블 구조화: 규칙은 테이블로
     [ ] 이유(Why) 포함: 각 제약에 이유 명시
-    [ ] 토큰 예산 (6-Tier 유동 한도, tofu-at-spawn-templates.md 참조):
+    [ ] 토큰 예산 (6-Tier 유동 한도, tofu-at-spawn-templates/references/ce-checklist.md 참조):
         T1 Explore: 1,200/1,800 | T2 Simple Worker: 1,500/2,500
         T3 General Worker: 2,000/3,500 | T4 Worker+Ralph: 2,500/4,000
         T5 Category Lead: 3,000/4,500 | T6 Lead+Ralph: 3,500/5,000
@@ -2348,10 +2348,10 @@ Skill("tofu-at", args: "spawn {team_id}")
 |------|----------|
 | 리소스 탐색 + 분석 알고리즘 | `tofu-at-workflow.md` |
 | YAML 스키마 + 예시 | `tofu-at-registry-schema.md` |
-| 스폰 프롬프트 템플릿 | `tofu-at-spawn-templates.md` |
+| 스폰 프롬프트 템플릿 | `tofu-at-spawn-templates/` (SKILL.md + references/) |
 | CE 체크리스트 | `context-engineering-collection.md` |
 | /prompt 파이프라인 내재화 | `prompt.md` (목적감지, 요소확장, 전문가토론, CE) |
-| 전문가 도메인 프라이밍 | `tofu-at-spawn-templates.md` §7.5 (27도메인 137명 전문가 DB 내장) |
+| 전문가 도메인 프라이밍 | `tofu-at-spawn-templates/references/expert-db.md` (27도메인 137명 전문가 DB 내장) |
 | Claude 최적화 전략 | `claude-4.6-prompt-strategies.md` (default_to_action 등) |
 | Agent Teams 참조 구현 | `knowledge-manager.md` (STEP 3-6) |
 
@@ -2387,10 +2387,10 @@ Skill("tofu-at", args: "spawn {team_id}")
 | 수정 대상 | 함께 확인할 파일/섹션 | 이유 |
 |----------|-------------------|------|
 | STEP 0.5 (환경 감지) | WSL/tmux/브라우저 매트릭스, 제약 사항 테이블 WSL 항목 | env_profile 변경 시 제약 사항과 불일치 방지 |
-| STEP 5 + 5-V (프롬프트 생성+검증) | `tofu-at-spawn-templates.md` CE 체크리스트, 6-Tier 토큰 한도, STEP 7-4 pre-spawn assertion | 커맨드↔스킬 간 토큰 정책 동기화, 검증 게이트 기준값 일치 |
+| STEP 5 + 5-V (프롬프트 생성+검증) | `tofu-at-spawn-templates/references/ce-checklist.md` CE 체크리스트, 6-Tier 토큰 한도, STEP 7-4 pre-spawn assertion | 커맨드↔스킬 간 토큰 정책 동기화, 검증 게이트 기준값 일치 |
 | STEP 7 (실행/대시보드) | `.team-os/artifacts/` 파일명·포맷, 제약 사항 테이블 | 대시보드 파서 호환 유지 |
 | 제약 사항 테이블 | STEP 0.5-3 env_profile, STEP 7-2.1, STEP 7-2.5 | 제약 추가 시 해당 STEP에도 반영 |
-| 참조 스킬 테이블 | `tofu-at-workflow.md`, `tofu-at-spawn-templates.md` | 스킬 파일 변경 시 커맨드 참조 업데이트 |
+| 참조 스킬 테이블 | `tofu-at-workflow.md`, `tofu-at-spawn-templates/` | 스킬 파일 변경 시 커맨드 참조 업데이트 |
 
 ---
 
