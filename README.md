@@ -93,9 +93,10 @@ bash install.sh
 mkdir -p .claude/commands
 cp commands/tofu-at.md .claude/commands/
 
-# 2. 스킬 복사
+# 2. 스킬 복사 (flat files + directories)
 mkdir -p .claude/skills
-cp skills/*.md .claude/skills/
+cp skills/*.md .claude/skills/ 2>/dev/null || true
+cp -r skills/*/ .claude/skills/ 2>/dev/null || true
 
 # 3. .team-os 복사
 cp -r .team-os .

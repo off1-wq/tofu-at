@@ -222,7 +222,7 @@ install_files() {
   cp "$SRC/commands/tofu-at.md" .claude/commands/
   success ".claude/commands/tofu-at.md"
 
-  # Skills
+  # Skills (flat .md files + directory-based skills)
   mkdir -p .claude/skills
   local skill_count=0
   for f in "$SRC/skills/"*.md; do
@@ -230,7 +230,14 @@ install_files() {
     cp "$f" .claude/skills/
     skill_count=$((skill_count + 1))
   done
-  success ".claude/skills/tofu-at-*.md ($skill_count files)"
+  for d in "$SRC/skills/"*/; do
+    [ -d "$d" ] || continue
+    local dirname
+    dirname=$(basename "$d")
+    cp -r "$d" .claude/skills/
+    skill_count=$((skill_count + 1))
+  done
+  success ".claude/skills/tofu-at-* ($skill_count items)"
 
   step 4 "Setting up .team-os infrastructure... / .team-os 인프라 설정 중..."
 
@@ -493,11 +500,11 @@ verify_installation() {
     fi
   done
 
-  # Check skills
+  # Check skills (flat files + directories)
   local skill_count
-  skill_count=$(ls .claude/skills/tofu-at-*.md 2>/dev/null | wc -l)
+  skill_count=$(ls -d .claude/skills/tofu-at-*.md .claude/skills/tofu-at-*/ 2>/dev/null | wc -l)
   if [ "$skill_count" -ge 1 ]; then
-    success ".claude/skills/tofu-at-*.md ($skill_count files)"
+    success ".claude/skills/tofu-at-* ($skill_count items)"
   else
     error "No tofu-at skill files found!"
     errors=$((errors + 1))
