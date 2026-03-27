@@ -570,7 +570,7 @@ AskUserQuestion({
 - tmux env `ANTHROPIC_BASE_URL` **미설정** (Anthropic Direct)
 - Claude(sonnet)가 직접 `codex exec` CLI subprocess를 실행
 - 참조: `.claude/agents/codex-exec-worker.md`, `.claude/skills/codex-exec-bridge.md`
-- 스폰 템플릿: `tofu-at-spawn-templates.md §9` 참조
+- 스폰 템플릿: `tofu-at-spawn-templates/references/worker-templates.md §9` 참조
 
 Bridge mode Workers 스폰 방식:
 ```
@@ -584,7 +584,7 @@ Agent(
   model: "sonnet",
   team_name: "{TEAM_NAME}",
   run_in_background: true,
-  prompt: "{codex-exec-worker 스폰 프롬프트 (tofu-at-spawn-templates §9 참조)}"
+  prompt: "{codex-exec-worker 스폰 프롬프트 (tofu-at-spawn-templates/references/worker-templates.md §9 참조)}"
 )
 
 # Workers 스폰 완료 후 CLIProxyAPI env 복원 (필요 시)
