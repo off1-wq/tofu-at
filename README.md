@@ -622,51 +622,39 @@ your-project/
         └── MEMORY.md
 ```
 
-## tofu-at-codex (Hybrid Mode)
+## tofu-at-codex v2 (Hybrid Mode)
 
-> **Branch: `feature/codex`**
+OpenAI Codex를 **선택적으로** 통합하는 하이브리드 모드. Codex CLI 설치 여부를 자동 감지합니다.
 
-Run Agent Teams with **Opus as Leader** and **GPT-5.3-Codex as Teammates** via [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
-
-### How It Works
+### How It Works (v2)
 
 ```
 Leader (Opus 4.6)  ──── Anthropic Direct API
                          |
-Teammates (Codex)  ──── CLIProxyAPI (localhost:8317)
-                         └── claude-sonnet-4-6 → gpt-5.3-codex (alias mapping)
+Workers (Sonnet)   ──── Anthropic Direct API
+                         |
+DA (codex exec)    ──── Codex CLI → GPT-5.4  (adversarial review, optional)
 ```
 
-tmux session-level environment variables route new panes through CLIProxyAPI, while the Leader process stays on Anthropic Direct.
+Workers는 항상 Anthropic Direct. Codex는 DA(adversarial review) 역할에만 선택적으로 사용됩니다. DA는 팀원이 아니라 Lead가 `codex exec`를 직접 호출하는 방식입니다.
 
-### Install (Codex addon)
+### 2 Modes
+
+| Mode | Workers | DA | Requires |
+|------|---------|-----|----------|
+| **Standard** | Anthropic | Anthropic (teammate) | tmux only |
+| **Codex DA** (recommended) | Anthropic | `codex exec` adversarial | + Codex CLI |
+
+자동 감지: Codex CLI 설치 여부에 따라 사용 가능한 모드만 표시됩니다. Codex 없이도 Standard 모드로 동일한 팀 워크플로우를 사용할 수 있습니다.
+
+### Install (Codex addon, optional)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/treylom/tofu-at/feature/codex/install-codex.sh | bash
+npm install -g @openai/codex
+codex login
 ```
 
-Or manually:
-
-```bash
-git clone -b feature/codex https://github.com/treylom/tofu-at.git /tmp/tofu-at
-cd /tmp/tofu-at && bash install-codex.sh
-```
-
-### Additional Requirements
-
-| Dependency | Install |
-|-----------|---------|
-| Codex CLI | `npm install -g @openai/codex && codex --login` |
-| CLIProxyAPI | `git clone https://github.com/router-for-me/CLIProxyAPI.git ~/CLIProxyAPI` |
-| OAuth Token | `cd ~/CLIProxyAPI && ./cli-proxy-api` (TUI auth) |
-
-### Dependency Check
-
-```bash
-bash .claude/scripts/setup-tofu-at-codex.sh           # check all
-AUTO_INSTALL=1 bash .claude/scripts/setup-tofu-at-codex.sh  # auto-install missing
-RUN_PROXY_TEST=1 bash .claude/scripts/setup-tofu-at-codex.sh  # test proxy routing
-```
+Codex 없이 Standard 모드만 사용하려면 추가 설치 불필요.
 
 ### Usage
 
@@ -674,7 +662,18 @@ RUN_PROXY_TEST=1 bash .claude/scripts/setup-tofu-at-codex.sh  # test proxy routi
 /tofu-at-codex
 ```
 
-Same workflow as `/tofu-at`, but teammates run on Codex instead of Claude.
+환경을 자동 감지하고 사용 가능한 모드를 선택할 수 있습니다.
+
+### Why v2? (Benchmark Results)
+
+autoresearch 실험(동일 태스크 4회 반복)으로 검증:
+
+| Strategy | Score | Duration |
+|----------|-------|----------|
+| v1 baseline | 6.5 | 63 min |
+| **v2 Codex DA (recommended)** | **11.0** | **4.3 min** |
+
+v2 Codex DA 모드는 품질 +69%, 속도 -93%, 의존성 -60%.
 
 ## Troubleshooting
 
