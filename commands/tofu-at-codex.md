@@ -1,153 +1,221 @@
 ---
-description: "Codex 하이브리드 팀 — Codex 유무에 따라 자동 감지, DA 강화"
+description: "Codex 하이브리드 팀 (Leader=Opus, Workers=Anthropic Direct, DA=Codex adversarial)"
 allowedTools: Bash, Read, Write, Glob, Grep, Skill, AskUserQuestion, Task, TeamCreate, TeamDelete, TaskCreate, TaskUpdate, TaskList, SendMessage
 ---
 
 # /tofu-at-codex — Codex Hybrid Team v2
 
-> 기존 `/tofu-at` 워크플로우를 그대로 사용하되,
-> **Codex CLI가 있으면 DA(Devil's Advocate)를 자동 강화**하는 하이브리드 모드입니다.
+> **Leader = Opus (Anthropic Direct)**
+> **Workers = Sonnet/Opus (Anthropic Direct)**
+> **DA = Codex adversarial review (`codex exec`)**
+> **PR Review = `codex review --base` (선택)**
 >
-> Codex가 없어도 Standard 모드로 동일한 팀 워크플로우를 사용할 수 있습니다.
+> 기존 `/tofu-at` 워크플로우를 그대로 사용하되,
+> DA 역할을 Codex adversarial review로 실행하는 하이브리드 모드입니다.
+>
+> **v2 변경사항 (2026-03-31 autoresearch 실험 기반):**
+> - CLIProxyAPI 제거 — Workers는 Anthropic Direct로 실행
+> - DA를 `codex exec` adversarial review로 교체 (97초, score 11.0)
+> - `codex review --base`를 PR/diff 리뷰 옵션으로 추가
+> - 의존성 3개 → 2개로 축소 (CLIProxyAPI, OAuth 불필요)
 
 $ARGUMENTS
 
 ---
 
-## 모드 개요
+## Quick Start (설치 가이드)
 
-| 모드 | Workers | DA | 필요 조건 |
-|------|---------|-----|----------|
-| **Standard** | Anthropic Direct | Anthropic 팀원 | Claude Code + tmux |
-| **Codex DA** (추천) | Anthropic Direct | `codex exec` adversarial | + Codex CLI 설치 |
-
-Codex CLI 설치 여부를 자동 감지하여 사용 가능한 모드만 표시합니다.
-
----
-
-## Quick Start
-
-### 의존성
-
-**필수:**
-
-| # | 의존성 | 용도 | 설치 |
-|---|--------|------|------|
-| 1 | **tmux** | Agent Teams Split Pane | `sudo apt install tmux` / `brew install tmux` |
-| 2 | **Claude Code** | Agent Teams 기반 | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
-
-**선택 (Codex DA 모드 활성화):**
-
-| # | 의존성 | 용도 | 설치 |
-|---|--------|------|------|
-| 3 | **Codex CLI** | DA adversarial review | `npm install -g @openai/codex && codex login` |
-
-> Codex CLI는 ChatGPT Plus/Pro 구독 또는 OpenAI API key가 필요합니다.
-> 없어도 Standard 모드로 동일한 팀 워크플로우를 사용할 수 있습니다.
-
-### 실행
+### 원클릭 환경 체크
 
 ```bash
-tmux new -s claude   # tmux 세션 시작
-claude               # Claude Code 실행
-/tofu-at-codex       # 자동 모드 감지 + 실행
+bash .claude/scripts/setup-tofu-at-codex.sh
+```
+
+### 의존성 목록
+
+| # | 의존성 | 용도 | 설치 명령어 |
+|---|--------|------|------------|
+| 1 | **tmux** | Agent Teams Split Pane | `sudo apt install tmux` (Linux) / `brew install tmux` (macOS) |
+| 2 | **Codex CLI** | DA adversarial review + PR review | `npm install -g @openai/codex && codex login` |
+| 3 | **Claude Code** | Agent Teams 기반 | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
+
+> **v2에서 제거된 의존성:** CLIProxyAPI, OAuth 토큰 (더 이상 불필요)
+
+### Codex Plugin (선택)
+
+`codex review` 기능을 Claude Code 내에서 slash command로 사용하려면:
+
+```
+/plugin marketplace add openai/codex-plugin-cc
+/plugin install codex@openai-codex
+/reload-plugins
+```
+
+### 실행 방법
+
+```bash
+# 1. tmux 세션 시작 (이미 tmux 안이면 스킵)
+tmux new -s claude
+
+# 2. Claude Code 실행
+claude
+
+# 3. /tofu-at-codex 실행
+/tofu-at-codex
 ```
 
 ---
 
 <mindset priority="HIGHEST">
-이 명령어는 **환경 감지 → 모드 선택 → 팀 구성**을 수행하고,
-팀 실행은 `/tofu-at`에 위임합니다.
+이 명령어는 **환경 설정 + 작업 유형별 Codex 라우팅**을 수행하고,
+팀 구성은 `/tofu-at`에 위임합니다.
 
-**v2 설계 근거 (autoresearch 실험 결과):**
+**v3.0 핵심 아키텍처 (autoresearch 17라운드 기반, R0-R17):**
 
-| Strategy | Score | Duration |
-|----------|-------|----------|
-| Baseline (기존) | 6.5 | 63분 |
-| **Workers=Anthropic + DA=Codex adversarial** | **11.0** | **4.3분** |
+| 역할 | 모델 | 실행 방식 |
+|------|------|----------|
+| Leader | Opus 4.6 [1M] | Anthropic Direct |
+| Workers (비코딩) | Sonnet 4.6 | Anthropic Direct (팀원 스폰) |
+| Workers (코딩) | GPT-5.4 | `codex exec --full-auto` (Lead 직접 호출) |
+| DA | GPT-5.4 | `adversarial-review --scope working-tree` (Lead 직접 호출) |
+| PR Review | GPT-5.4 | `codex review --base` (선택) |
 
-Workers를 Anthropic Direct로 실행하고 Codex를 DA(adversarial review)에만 사용하는 것이
-품질, 속도, 안정성 모든 면에서 최적.
+**작업 유형별 Codex 라우팅 (CRITICAL):**
+
+| 작업 유형 | 최적 전략 | Score | 근거 |
+|----------|----------|-------|------|
+| **코딩** (버그 수정, 구현, 리팩토링) | `codex exec` 직접 | 11.0 | R4: 67초, 팀 대비 4.7x 빠름, 품질 동일 |
+| **비코딩** (리서치, 분석, 문서화) | Anthropic Workers 스폰 | 10.0 | R6: 품질 8/10, codex보다 상세 |
+| **DA** (리뷰, 반론 검증) | `adversarial-review --scope wt` | 11.0 | R14: R2 동점, prompt_effort 3→0 |
+
+**라우팅 판단 기준:**
+- 태스크에 "파일 생성/수정/구현/수정/fix/refactor" 키워드 → **코딩** → codex exec
+- 태스크에 "조사/분석/리서치/정리/문서/보고서" 키워드 → **비코딩** → Anthropic Worker
+- 태스크에 "리뷰/검토/검증" 키워드 → **DA** → adversarial-review --scope working-tree
+- 복합 태스크 → 비코딩 부분은 Worker, 코딩 부분은 codex exec로 분리
+
+**v3 주의사항 (autoresearch R11-R17 기반):**
+
+| 금지 | 이유 | 대안 |
+|------|------|------|
+| `/codex:rescue`로 코딩 태스크 | 오버헤드 +100s, speed_bonus 손실 (R11) | `codex exec --full-auto` 직접 |
+| `adversarial-review --base HEAD~N` | diff만 분석, 대상 코드 무시 (R13: vc=0/5) | `--scope working-tree` 필수 |
+| `--effort low/xhigh` 파라미터 | 단순 태스크에 효과 없음, 역설적으로 느림 (R12) | default 유지 |
+| 동일 파일 병렬 codex exec | 파일 쓰기 충돌, 수정 미적용 (R17: score 6.0) | 순차 실행 또는 다른 파일만 병렬 |
+
+**codex exec 코딩 태스크 실행 방식:**
+
+코딩 역할이 tofu-at STEP 7에서 할당되면, Lead가 팀원 스폰 대신 직접 실행:
+
+```bash
+RESULT=$(codex exec --full-auto "{태스크 프롬프트}" 2>&1)
+```
+
+- 팀원 스폰 오버헤드 없음 (67초 vs 291초)
+- 결과를 즉시 사용 가능 (동기 실행)
+- 여러 코딩 태스크: **다른 파일이면** 병렬 가능, **동일 파일이면** 순차 필수 (R17)
+
+**복합 프로젝트 예시:**
+
+```
+태스크: "API 설계 리서치 + 엔드포인트 3개 구현 + 코드 리뷰"
+
+→ Worker-1 (Anthropic): API 설계 리서치 + 문서화               [비코딩]
+→ codex exec ×3: 엔드포인트 구현                                [코딩]
+→ adversarial-review --scope working-tree: 변경분 회귀 검증      [DA]
+```
+
+**설계 근거 (autoresearch 17라운드 실험, v2+v3):**
+
+| 작업 | 전략 | Score | Duration | 실험 |
+|------|------|-------|----------|------|
+| DA/리뷰 | rescue → adv-review --scope wt | **11.0** | 222s | R14 (v3) |
+| DA/리뷰 | Workers(Anthropic) + 수동 Codex DA | **11.0** | 259s | R2 (v2) |
+| 코딩 | codex exec 단독 | **11.0** | 67s | R4 (v2) |
+| 코딩 | /codex:rescue default | 10.5 | 169s | R11 (v3) |
+| 비코딩 | Team Workers (Anthropic) | 10.0 | 291s | R6 (v2) |
+| 종합 | Team + plugin integrated | 10.0 | 334s | R16 (v3) |
+| 검증 | rescue + Gate + adv-review | 10.0 | 382s | R15 (v3) |
+| 코딩 | /codex:rescue effort=low | 10.0 | 224s | R12 (v3) |
+| 병렬 | 3x parallel rescue | **6.0** | 174s | R17 (v3) |
+
+핵심:
+- 코딩은 raw codex exec가 압도적 (rescue 래핑은 오버헤드만 추가)
+- DA는 adversarial-review --scope wt가 수동 prompt와 동점이면서 자동화
+- 비코딩은 Anthropic Workers가 약간 우세
+- 병렬 codex exec는 동일 파일에서 실패
+- proxy mode는 모든 작업에서 최하위 (v2에서 확인)
 
 <tofu-at-overrides priority="HIGH">
-**tofu-at 위임 시 오버라이드 — 감지된 모드별 분기**
+**tofu-at 위임 시 오버라이드 사항**
 
-### Standard 모드 (Codex 없음)
-- tofu-at STEP 2-B DA 선택: 기존 tofu-at 그대로 (OFF / Opus / Sonnet)
-- Workers: Anthropic Direct (변경 없음)
-- DA: tofu-at 기본 DA 팀원 방식 (변경 없음)
+tofu-at의 STEP 2-B (DA 모델 선택)에서 선택지를 다음으로 대체:
+- "OFF" — DA 없이 진행
+- "ON (Codex adversarial-review) (Recommended)" — `adversarial-review --scope working-tree` (v3, 자동화)
+- "ON (Codex exec manual)" — `codex exec` + 수동 adversarial prompt (v2 방식)
+- "ON (Opus)" — Anthropic Opus로 DA (Leader와 동일)
 
-### Codex DA 모드 (추천)
-- tofu-at STEP 2-B DA 선택지를 다음으로 대체:
-  - "OFF" — DA 없이 진행
-  - "ON (Codex Adversarial) (Recommended)" — `codex exec`로 DA
-  - "ON (Opus)" — Anthropic Opus로 DA (기존 팀원 방식)
-- Workers: Anthropic Direct
-- DA: **Lead가 `codex exec`를 직접 호출** (팀원 스폰 아님)
+**v3 Codex Adversarial DA 동작 방식 (RECOMMENDED):**
 
-**Codex DA 동작 방식:**
+v3의 DA는 **adversarial-review 플러그인**을 사용. 수동 프롬프트 작성 불필요 (prompt_effort=0).
 
-Codex DA는 팀원이 아닙니다. Lead가 Bash로 `codex exec`를 직접 호출합니다.
-코딩 태스크도 `codex exec`로 직접 실행합니다 (팀원 스폰 안 함).
+1. Worker가 코드를 수정하면 working-tree에 변경사항이 생김
+2. Lead가 `adversarial-review --scope working-tree`를 호출
+3. 플러그인이 자동으로 adversarial 프롬프트를 구성하고 JSON 결과 반환
+4. Lead가 결과(verdict, findings, confidence)를 판단
 
-```
-Codex DA 모드 실행 흐름:
-  Lead ←→ Worker-1 (비코딩, Anthropic 팀원)
-        ─→ codex exec (코딩 태스크, Bash 직접)
-        ─→ codex exec (DA adversarial, Bash 직접)
-```
+**v2 대비 v3 DA 개선:**
 
-**작업 유형별 라우팅 (STEP 7-4-1 오버라이드):**
+| 속성 | v2 (codex exec manual) | v3 (adversarial-review) |
+|------|----------------------|----------------------|
+| Score | 11.0 (R2) | 11.0 (R14) |
+| Duration | 97초 | ~100초 |
+| prompt_effort | 3 (매번 수작업) | **0** (자동) |
+| 출력 | 자유형 텍스트 | **JSON** (verdict, severity, confidence) |
+| 회귀 탐지 | 가능 (수동 지시) | **자동** (working-tree diff 분석) |
 
-| 작업 유형 | 실행 방식 | 근거 |
-|----------|----------|------|
-| 코딩 (구현/수정/fix) | `codex exec --full-auto` Lead 직접 호출 | 67초, 팀 대비 4.7x 빠름 |
-| 비코딩 (리서치/분석/문서) | Anthropic Worker 팀원 스폰 | 품질 8/10, codex보다 상세 |
-| DA (리뷰/검증) | `codex exec` adversarial Lead 직접 호출 | 97초, 50% 더 깊은 분석 |
+**DA 호출 방법 (STEP 7-6 대체):**
 
-**라우팅 판단:** 태스크에 구현/수정/fix/refactor 키워드 → codex exec. 조사/분석/리서치/문서 키워드 → Worker 스폰.
-
-장점:
-- 코딩: 팀 스폰 오버헤드 없이 67초 완료
-- 비코딩: Anthropic Workers가 더 상세한 분석
-- DA: idle 문제 없음, 타이밍 제어 완벽
-- 복합 프로젝트: 코딩+비코딩 혼합 시 각각 최적 도구 사용
-
-**DA 개별 리뷰 템플릿 (STEP 7-6 대체):**
-
-Worker 결과를 받으면 Lead가 직접 실행:
+Worker 결과가 working-tree에 반영된 후 Lead가 실행:
 
 ```bash
-codex exec --full-auto "Review the following work as a Devil's Advocate. Challenge design decisions, question assumptions, find hidden risks, race conditions, failure modes. For each concern: severity, location, the issue, and what would be safer.
+# v3 방식 (recommended): 플러그인 자동 프롬프트
+node "{companion_path}" adversarial-review --scope working-tree --json
 
-=== TASK DESCRIPTION ===
-{원래 태스크 설명}
-
-=== WORKER OUTPUT ===
-{Worker 결과물}
-
-Top 5-10 findings only. Be specific with file paths and line numbers."
+# 결과: JSON {verdict, summary, findings[{severity, title, body, file, line_start, confidence, recommendation}], next_steps}
 ```
 
-**DA 종합 리뷰 템플릿 (STEP 7-6.5 대체):**
+**DA 종합 리뷰 (STEP 7-6.5 대체):**
 
-모든 Worker 완료 후:
+모든 Worker 완료 후, 전체 변경분에 대해 1회 실행:
 
 ```bash
-codex exec --full-auto "Cross-validate multiple workers' outputs. Find inconsistencies, missed requirements, and integration issues.
-
-=== ORIGINAL PLAN ===
-{팀 플랜}
-
-=== WORKER RESULTS ===
-{모든 Worker 결과 종합}
-
-Provide: (1) cross-validation findings, (2) integration concerns, (3) quality assessment, (4) residual risks."
+node "{companion_path}" adversarial-review --scope working-tree --json
 ```
 
-**DA OFF인 경우:** STEP 7-6, 7-6.5를 건너뜁니다.
-**DA ON (Opus)인 경우:** 기존 tofu-at 방식 그대로 — Opus 팀원으로 DA 스폰.
+> ⚠️ `--base HEAD~N`을 사용하지 말 것. git 히스토리 diff만 분석하여 현재 작업과 무관한 이슈를 반환함 (R13: vc=0/5).
+
+**DA OFF인 경우:**
+STEP 7-6, 7-6.5를 건너뜁니다.
+
+**DA ON (Codex exec manual)인 경우:**
+v2 방식 — Lead가 수동으로 adversarial prompt를 작성하여 `codex exec`로 실행.
+프롬프트 작성 시간이 추가되지만, 특정 관점을 지시할 수 있음.
+
+**DA ON (Opus)인 경우:**
+기존 tofu-at 방식 그대로 — Opus 팀원으로 DA 스폰.
 </tofu-at-overrides>
+
+프리셋 빠른 시작 (tofu-at-presets.md 참조):
+- /tofu-at 위임 시 "빠른 시작" 옵션이 자동 적용됨
+- 프리셋 선택(리서치/개발/분석/콘텐츠) → AskUserQuestion 2개만으로 팀 구성
+- Workers는 Anthropic Direct로 실행 (v2: 프록시 라우팅 없음)
+
+코딩 태스크 Self-Check (pumasi discipline):
+- dev 프리셋 선택 시, Leader는 코드 본문 작성 금지
+- 워커에게 시그니처 + NL 요구사항만 전달
+- Dynamic Gate(bash 검증)가 Ralph 전에 자동 실행
+- 참조: tofu-at-workflow.md §8 (Dynamic Gate), §9 (Self-Check List)
 
 절대 금지:
 - 기존 tofu-at.md 수정 X
@@ -156,90 +224,125 @@ Provide: (1) cross-validation findings, (2) integration concerns, (3) quality as
 
 ---
 
-## PHASE 0: 환경 감지 + 모드 선택
+## PHASE 0: 사전 요구사항 확인 (자동화)
 
-### 0-1. 자동 감지
+### 0-SKIP: 검증 캐시 확인 (최초 1회 이후 스킵)
+
+```
+Glob(".team-os/.env-verified") 존재 확인:
+
+IF 존재:
+  Read(".team-os/.env-verified") → JSON 파싱
+  IF verified.session == current_tmux_session AND verified.agent_teams == true:
+    → "환경 검증 캐시 유효. PHASE 0 스킵합니다."
+    → PHASE 1로 직접 진행
+  ELSE:
+    → 캐시 무효 (세션 불일치). 전체 검증 진행.
+
+ELSE:
+  → 캐시 없음. 전체 검증 진행.
+```
+
+### 0-0. Setup 스크립트로 일괄 확인 (권장)
 
 ```bash
-# tmux 확인
-TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null) || TMUX_SESSION=""
-
-# Codex CLI 확인
-CODEX_VERSION=$(codex --version 2>/dev/null) || CODEX_VERSION=""
-CODEX_AUTH=$(codex whoami 2>/dev/null) || CODEX_AUTH=""
+bash .claude/scripts/setup-tofu-at-codex.sh
 ```
 
-### 0-2. 감지 결과 표시 + 모드 선택
+- exit code 0 → 모든 의존성 OK, PHASE 1로 진행
+- exit code > 0 → 누락 항목 안내됨
 
-```
-감지 결과:
-| 항목 | 상태 |
-|------|------|
-| tmux | {TMUX_SESSION 또는 "미실행"} |
-| Codex CLI | {CODEX_VERSION 또는 "미설치"} |
-| Codex 로그인 | {CODEX_AUTH 또는 "미인증"} |
+### 0-1. Codex CLI 확인
+
+```bash
+codex --version && codex whoami
 ```
 
-tmux 미실행 시 **중단**: "tmux 세션 내에서 실행해야 합니다."
+- 성공 → 버전 + 로그인 상태 표시 후 계속
+- 실패 → 설치/로그인 안내:
+  ```bash
+  npm install -g @openai/codex
+  codex login
+  ```
 
-**감지 기반 선택지 생성:**
+### 0-2. tmux 확인
+
+```bash
+tmux display-message -p '#S'
+```
+
+tmux 미실행 시 **중단**:
+> tmux 세션 내에서 실행해야 합니다.
+
+---
+
+## PHASE 1: Codex CLI 검증
+
+### 1-1. Codex 실행 테스트
+
+```bash
+RESPONSE=$(codex exec --full-auto "Reply with exactly: CODEX_OK" 2>&1)
+echo "$RESPONSE"
+```
+
+- `CODEX_OK` 포함 → Codex CLI 정상
+- 실패 → `codex login` 재실행 안내
+
+### 1-2. 사용자 안내
+
+> **Codex Hybrid Team v2.1 환경 확인 완료**
+>
+> | 역할 | 모델 | 실행 방식 | 대상 작업 |
+> |------|------|----------|----------|
+> | Leader | Opus 4.6 [1M] | Anthropic Direct | 오케스트레이션 |
+> | Workers (비코딩) | Sonnet 4.6 | Anthropic Direct (팀원 pane) | 리서치, 분석, 문서화 |
+> | Workers (코딩) | GPT-5.4 | `codex exec` (Lead 직접) | 구현, 수정, 리팩토링 |
+> | DA | GPT-5.4 | `codex exec` adversarial | 리뷰, 반론 검증 |
+>
+> **라우팅**: 코딩 태스크는 `codex exec`로 직접, 비코딩은 팀원 스폰.
+>
+> `/tofu-at` 워크플로우를 시작합니다...
+
+---
+
+## PHASE 1.5: PR/Diff 리뷰 (선택)
+
+**작업 시작 전 최근 변경사항을 빠르게 리뷰하려면:**
 
 ```
-options = []
-
-# 항상 사용 가능
-options.push("Standard — Workers=Anthropic, DA=Anthropic 팀원")
-
-# Codex CLI 설치 + 로그인 완료 시
-IF CODEX_VERSION AND CODEX_AUTH:
-  options.push("Codex DA (Recommended) — Workers=Anthropic, DA=codex exec adversarial")
-
 AskUserQuestion({
   "questions": [{
-    "question": "실행 모드를 선택하세요.",
-    "header": "Mode",
-    "options": options (감지된 것만 표시)
+    "question": "작업 전 codex review로 최근 변경사항을 리뷰할까요? (57초 소요)",
+    "header": "PR Review",
+    "options": [
+      {"label": "스킵 (Recommended)", "description": "바로 팀 작업 시작"},
+      {"label": "최근 5커밋 리뷰", "description": "codex review --base HEAD~5"},
+      {"label": "특정 브랜치 대비", "description": "base 브랜치를 직접 지정"}
+    ],
+    "multiSelect": false
   }]
 })
 ```
 
-**Codex CLI가 없는 사용자**에게는 Standard만 표시됩니다.
-
----
-
-## PHASE 1: 모드별 환경 설정
-
-### Standard 모드
-
-추가 설정 없음. 바로 PHASE 2로 진행.
-
-### Codex DA 모드
-
+리뷰 선택 시:
 ```bash
-# Codex CLI 실행 테스트
-RESPONSE=$(codex exec --full-auto "Reply with exactly: CODEX_OK" 2>&1)
+codex review --base {BASE_REF}
 ```
 
-- `CODEX_OK` 포함 → Codex DA 준비 완료
-- 실패 → `codex login` 재실행 안내, Standard로 폴백
-
-> **Codex DA 모드 활성화**
->
-> | 역할 | 모델 | 실행 방식 |
-> |------|------|----------|
-> | Leader | Opus | Anthropic Direct |
-> | Workers | Sonnet/Opus | Anthropic Direct |
-> | DA | GPT-5.4 | `codex exec` (Lead 직접 호출) |
+결과를 팀 컨텍스트에 포함하여 tofu-at에 전달합니다.
 
 ---
 
-## PHASE 2: Agent Office 대시보드 실행 (선택)
+## PHASE 2: Agent Office 대시보드 실행
 
 ### 2-1. agent-office 경로 감지
+
+agent_office_path를 아래 순서로 탐색:
 
 ```
 1. Bash("echo $AGENT_OFFICE_PATH 2>/dev/null") → 환경변수
 2. 현재 작업 디렉토리에서 상위로 walk-up하며 `agent-office/server.js` 탐색
+3. 처음 발견된 경로 사용
 ```
 
 → 모두 실패: "Agent Office 미설치. 대시보드 없이 진행."
@@ -254,73 +357,191 @@ IF health == "200":
 ELSE:
   Bash("lsof -ti:3747 | xargs kill -9 2>/dev/null || true")
   Bash("AGENT_OFFICE_ROOT=$(pwd) node {agent_office_path}/server.js --open", run_in_background: true)
+  # 헬스체크 루프 (최대 10초)
+```
+
+### 2-3. 브라우저 오픈 (WSL)
+
+```bash
+cmd.exe /c start http://localhost:3747 2>/dev/null || true
 ```
 
 ---
 
-## PHASE 3: tofu-at 워크플로우 위임
+## PHASE 3: tofu-at 워크플로우 위임 (전체 클론)
 
 ```
 Skill("tofu-at", args: "$ARGUMENTS")
 ```
 
-표준 tofu-at STEP 0~9 전체 실행.
+표준 tofu-at STEP 0~9 전체 실행. 아래 항목이 반드시 포함되어야 합니다:
 
-### 모드별 tofu-at 오버라이드
+### 필수 포함 항목
 
-#### Standard 모드
-- 변경 없음. tofu-at 기본 동작 그대로.
+| tofu-at STEP | 항목 | v2.1 변경사항 |
+|-------------|------|------------|
+| STEP 7-2.5 | 공유 메모리 초기화 | 변경 없음 |
+| STEP 7-4-0.5 | progress_update_rule | 변경 없음 |
+| STEP 7-4-1 | Worker 스폰 | **v2.1: 작업 유형별 분기** (아래 참조) |
+| STEP 7-4-2 | 진행 상태 초기 업데이트 | 변경 없음 |
+| STEP 7-5.5 | Health Check 루프 | 비코딩 Workers만 해당 |
+| STEP 7-6 | 결과 수신 + DA 리뷰 | **Lead가 `codex exec` 직접 호출** |
+| STEP 7-6.5 | DA 종합 리뷰 | **Lead가 `codex exec` 종합 리뷰** |
+| STEP 7-7 | 셧다운 + Results 보고서 | DA 셧다운 불필요. 비코딩 Workers만 셧다운 |
+| STEP 8 | 검증 + 보고 | 변경 없음 |
+| STEP 9 | 재실행 커맨드 생성 | 변경 없음 |
 
-#### Codex DA 모드
+### v2.1 핵심: 작업 유형별 Codex 라우팅 (STEP 7-4-1 오버라이드)
 
-| tofu-at STEP | v2 변경사항 |
-|-------------|------------|
-| STEP 2-B | DA 선택지: OFF / Codex Adversarial(추천) / Opus |
-| STEP 7-4-1 | **동시 스폰 OK** (DA를 팀원으로 스폰하지 않음) |
-| STEP 7-6 | Lead가 `codex exec` 직접 호출 (DA 팀원 아님) |
-| STEP 7-6.5 | Lead가 `codex exec` 종합 리뷰 |
-| STEP 7-7 | DA 셧다운 불필요 (프로세스 아님) |
-| 나머지 | 변경 없음 |
+tofu-at STEP 7-4-1에서 각 역할을 스폰할 때, **작업 유형에 따라 실행 방식을 분기**:
+
+```
+FOR EACH role in PLAN:
+  IF role.task_type == "코딩" (구현/수정/fix/refactor/버그수정):
+    # codex exec 직접 실행 (팀원 스폰 안 함)
+    # R4 결과: 67초, score 11.0
+    RESULT = Bash("codex exec --full-auto '{role.prompt}'")
+    → 결과를 TEAM_PROGRESS.md에 기록
+    → Worker 스폰/셧다운 오버헤드 없음
+
+  ELSE IF role.task_type == "비코딩" (리서치/분석/문서화/정리):
+    # Anthropic Worker 팀원 스폰
+    # R6 결과: 품질 8/10, 더 상세한 분석
+    Agent(
+      name: "{ROLE_NAME}",
+      team_name: "{TEAM_NAME}",
+      run_in_background: true,
+      mode: "bypassPermissions",
+      prompt: "{role.prompt}"
+    )
+
+  ELSE IF role.task_type == "DA":
+    # DA는 스폰하지 않음 — STEP 7-6에서 Lead가 직접 호출
+    → DA 역할 등록만 하고 스폰 건너뜀
+```
+
+**복합 프로젝트 실행 흐름 예시:**
+
+```
+태스크: "API 설계 리서치 + 엔드포인트 3개 구현 + 코드 리뷰"
+
+STEP 7-4-1:
+  Worker-1 (비코딩) → Agent 스폰 → API 설계 리서치 + 문서화
+  Worker-2 (코딩)   → codex exec  → 엔드포인트 A 구현
+  Worker-3 (코딩)   → codex exec  → 엔드포인트 B 구현
+  Worker-4 (코딩)   → codex exec  → 엔드포인트 C 구현
+  DA                → 등록만 (STEP 7-6에서 호출)
+
+STEP 7-5~7-6:
+  Worker-1 결과 수신 → DA codex exec adversarial 호출
+  Worker-2~4 결과 수신 (codex exec 동기 완료) → DA 호출
+
+STEP 7-6.5:
+  codex exec 종합 리뷰 → Lead 최종 판단
+```
+
+**코딩 태스크 codex exec 실행:**
+
+```bash
+# 단일 코딩 태스크
+RESULT=$(codex exec --full-auto "{태스크 프롬프트}" 2>&1)
+
+# 여러 코딩 태스크 병렬 (백그라운드)
+codex exec --full-auto "{태스크A}" > /tmp/codex-taskA.log 2>&1 &
+codex exec --full-auto "{태스크B}" > /tmp/codex-taskB.log 2>&1 &
+wait
+```
+
+### DA 실행 (STEP 7-6 / 7-6.5)
+
+```
+# STEP 7-6: Worker 결과 수신 시
+FOR EACH worker_result:
+  codex_da_review = Bash("codex exec --full-auto '{DA 호출 템플릿}'")
+  → Lead가 codex_da_review 결과를 판단
+
+# STEP 7-6.5: 모든 Worker 완료 후
+codex_final_review = Bash("codex exec --full-auto '{DA 종합 리뷰 템플릿}'")
+→ Lead가 최종 판단
+```
+
+### tofu-at STEP 2-B DA 모델 선택 오버라이드
+
+Codex Hybrid v2 모드에서는 DA 선택지를 다음으로 대체:
+- "OFF" — DA 없이 진행
+- "ON (Codex Adversarial) (Recommended)" — `codex exec`로 DA
+- "ON (Opus)" — Anthropic Opus로 DA (기존 팀원 방식)
+
+### 기존 에이전트 통합 (tofu-at Step 5-0에서 자동 처리)
+
+tofu-at의 Step 5-0이 기존 에이전트를 감지하면:
+- 원본 에이전트 콘텐츠를 보존한 채 최소 팀 통합 래퍼를 적용
+- v2에서는 Workers가 Anthropic Direct이므로 프록시 관련 설정 불필요
+- source_agent 필드가 registry.yaml에 설정된 역할은 Steps 5-1~5-6을 스킵
 
 ---
 
 ## PHASE 4: 정리
 
+tofu-at 완료 후 정리:
+
 ```bash
-# Agent Office stale 데이터 정리
+# 1. Agent Office stale 데이터 정리
 curl -s -X POST http://localhost:3747/api/session/clear --connect-timeout 2 || true
 ```
+
+> **v2 간소화:** CLIProxyAPI 종료, tmux 환경변수 제거 불필요
+> (Workers가 Anthropic Direct이므로 프록시 관련 정리 없음)
 
 ---
 
 ## 트러블슈팅
 
 ### Codex exec가 실패하는 경우
-1. `codex whoami` — 로그인 확인
-2. `codex login` — 재인증
-3. Standard 모드로 폴백 가능
+
+1. 로그인 확인: `codex whoami`
+2. 재로그인: `codex login`
+3. 네트워크 확인: `curl -s https://api.openai.com/v1/models | head -5`
 
 ### DA 리뷰 품질이 낮은 경우
-adversarial prompt 조정. 핵심 키워드:
+
+adversarial prompt를 조정합니다. 핵심 키워드:
 - "Devil's Advocate" — 반론 유도
 - "Challenge design decisions" — 설계 비판
-- "hidden risks, race conditions, failure modes" — 깊은 분석
+- "hidden risks, race conditions, failure modes" — 깊은 분석 유도
 
-### Agent Office 미실행
+### Agent Office가 자동 실행되지 않는 경우
+
+수동 실행:
 ```bash
 cd {project_root} && AGENT_OFFICE_ROOT=$(pwd) node agent-office/server.js &
 ```
+브라우저에서 http://localhost:3747 접속.
+
+### v1에서 마이그레이션
+
+v1(CLIProxyAPI 기반)에서 v2로 전환 시:
+1. CLIProxyAPI 프로세스 종료: `pkill -f "cli-proxy-api" || true`
+2. tmux 환경변수 제거:
+   ```bash
+   TMUX_SESSION=$(tmux display-message -p '#S')
+   tmux set-environment -t "$TMUX_SESSION" -u ANTHROPIC_BASE_URL
+   tmux set-environment -t "$TMUX_SESSION" -u ANTHROPIC_AUTH_TOKEN
+   tmux set-environment -t "$TMUX_SESSION" -u MAX_THINKING_TOKENS
+   ```
+3. `/tofu-at-codex` 재실행 → v2 자동 적용
+
+CLIProxyAPI는 더 이상 필요 없지만 삭제하지 않아도 됩니다.
 
 ---
 
 ## 제한사항
 
-| 항목 | Standard | Codex DA |
-|------|----------|----------|
-| 추가 의존성 | 없음 | Codex CLI (ChatGPT Plus/Pro 또는 API key) |
-| DA 품질 | 일반 | 높음 (adversarial, +50% 깊은 분석) |
-| DA 속도 | Worker 속도와 동일 | ~97초 (Lead 직접 호출) |
-| DA idle 문제 | 있을 수 있음 | 없음 (CLI 호출) |
-| Workers 속도 | 빠름 (Anthropic Direct) | 빠름 (동일) |
-| 비용 | Anthropic만 | Anthropic + Codex 사용량 |
-| extended thinking | 지원 | 지원 (Workers) |
+| 항목 | 설명 |
+|------|------|
+| DA 실행 방식 | Lead가 `codex exec` 동기 호출. Worker 결과 수신 때마다 ~97초 대기 |
+| codex exec 인증 | ChatGPT Plus/Pro 로그인 필요 |
+| Codex 모델 | `gpt-5.4` (기본), `gpt-5.4-mini` (경량), `spark` (Pro only, 초고속) |
+| Workers | Anthropic Direct — extended thinking, prompt caching 정상 작동 |
+| 비용 | Workers: Anthropic API 비용. DA: Codex 사용량 (ChatGPT 구독 내) |
+| `codex review` | diff 기반만 지원. 전체 파일 리뷰는 `codex exec` 사용 |
