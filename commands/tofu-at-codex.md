@@ -276,6 +276,77 @@ tmux 미실행 시 **중단**:
 
 ---
 
+## PHASE 0.5: Swarm Mode 감지 (v4.0 신규)
+
+> **v4.0에서 추가**: 대규모 병렬 작업(비코딩 워커 5명 이상) 감지 시 Swarm Mode 자동 활성화. CLIProxyAPI 경유 split pane teammate + DA Codex teammate 경로 복구. 소규모 작업엔 영향 없음(기존 v3 Standard mode 유지).
+
+### 0.5-1. 잠정 PLAN 작성 + task_type 분류
+
+Lead가 사용자 요청을 분석해 잠정 PLAN을 만들고, 각 역할에 `task_type`을 부여합니다.
+
+```
+분류 규칙:
+- "구현 / 수정 / fix / refactor / 파일 생성 / 코드 작성 / edit"      → coding
+- "조사 / 분석 / 리서치 / 정리 / 문서화 / 요약 / 보고서 / research"  → noncoding
+- "리뷰 / 검토 / 검증 / 반론 / review / adversarial"                 → DA
+```
+
+복합 태스크는 주 동사 우선으로 분할:
+- "API 설계 리서치 + 엔드포인트 3개 구현" → 리서치 1(noncoding) + 구현 3(coding) 분리
+- "lesson-a 대규모 리서치 + 문서화 6부서" → noncoding 6
+
+### 0.5-2. noncoding_count 계산 + Swarm 활성화 판정
+
+```
+noncoding_count := len([r for r in PLAN.roles if r.task_type == "noncoding"])
+
+IF noncoding_count >= 5:
+    swarm_activate = true
+    사용자 배너:
+    > 🔔 Swarm Mode 감지: 비코딩 워커 {N}명
+    > → PHASE 1.6에서 CLIProxyAPI 자동 기동 + split pane teammate 스폰
+    > → 코딩 태스크는 codex exec 직접 호출 경로 유지 (v3)
+    > → DA는 SendMessage 장기 대화 가능한 Codex teammate로 활성화
+    > → 예상 이득: 토큰 -40% ~ -60%, wall time 동등 이상, 관찰성 향상
+ELSE:
+    swarm_activate = false
+    → Standard mode. PHASE 1.6 전체 스킵. v3 경로 그대로 진행.
+```
+
+### 0.5-3. 컨텍스트 전달 준비
+
+PHASE 3에서 /tofu-at 스킬에 위임할 때 아래 컨텍스트를 함께 전달:
+
+```json
+{
+  "swarm_activate": true,
+  "noncoding_count": 7,
+  "coding_count": 2,
+  "da_count": 1,
+  "plan_role_map": [
+    {"name": "researcher-1", "task_type": "noncoding"},
+    {"name": "researcher-2", "task_type": "noncoding"},
+    {"name": "coder-1", "task_type": "coding"},
+    {"name": "devils-advocate", "task_type": "DA"}
+  ]
+}
+```
+
+이 컨텍스트는 STEP 7-4-1 Override에서 역할별 스폰 경로 결정에 사용됩니다.
+
+### 0.5-4. Swarm 비활성화 안전 장치
+
+다음 중 하나라도 해당하면 `swarm_activate = false`로 강제:
+
+- `noncoding_count < 5` (임계치 미달)
+- 이전 세션에서 CLIProxyAPI 5회 연속 기동 실패 캐시 (`.team-os/.env-verified`의 swarm 필드 참조)
+- 현재 세션이 tmux 밖에서 실행 중 (Desktop App, VSCode extension 등 split pane 불가 환경)
+- `--no-swarm` 플래그 (사용자가 명시적으로 Standard 강제)
+
+활성화 실패 시 경고 배너 + Standard mode로 투명 폴백.
+
+---
+
 ## PHASE 1: Codex CLI 검증
 
 ### 1-1. Codex 실행 테스트
@@ -329,7 +400,165 @@ AskUserQuestion({
 codex review --base {BASE_REF}
 ```
 
+> [!WARNING]
+> adversarial-review는 diff 기반 도구입니다. `--base HEAD~N`은 git diff만 분석합니다. 대상 코드를 직접 리뷰하려면 먼저 코드를 수정(codex exec/rescue)한 후 `--scope working-tree`로 변경분을 리뷰하세요.
+
 결과를 팀 컨텍스트에 포함하여 tofu-at에 전달합니다.
+
+---
+
+## PHASE 1.6: CLIProxyAPI 라이프사이클 (v4.0 신규, Swarm 전용)
+
+> **Swarm Mode 활성화 시에만 실행**. `swarm_activate == false`면 이 PHASE 전체 스킵.
+>
+> 역할: 비코딩 워커가 CLIProxyAPI 경유로 GPT-5.4에 라우팅되도록 프록시 기동 + tmux 세션 env 세팅. Lead process env는 **절대 건드리지 않음** (Opus가 GPT-5.4로 잘못 라우팅되는 대형 사고 방지).
+
+### 1.6-0. 선행 조건 체크
+
+```
+IF swarm_activate == false:
+    → PHASE 1.6 전체 스킵 → PHASE 2로 진행
+    (Standard mode 경로, v3 그대로)
+
+IF env_tmux == false:
+    → Swarm 불가 (tmux 없으면 split pane 못 만듦)
+    → swarm_activate = false 강제 + Standard mode 폴백
+    → "tmux 세션 필요" 안내 배너
+```
+
+### 1.6-1. 바이너리 확인
+
+```bash
+Bash("test -x ~/CLIProxyAPI/cli-proxy-api && echo ok || echo missing")
+```
+
+- `ok` → 다음 단계
+- `missing` → Standard mode 폴백 + 설치 안내:
+  > ⚠️ CLIProxyAPI 바이너리 미설치 — Swarm Mode 사용 불가, Standard mode로 진행합니다.
+  > 설치: `ENABLE_SWARM=1 bash .claude/scripts/setup-tofu-at-codex.sh`
+
+### 1.6-2. config.yaml 필드 검증
+
+```bash
+Bash("grep -cE 'port: 8317|alias: \"claude-sonnet-4-6\"' ~/CLIProxyAPI/config.yaml")
+```
+
+- `2` 이상 → 다음 단계
+- `2` 미만 → 표준 템플릿 복사 제안:
+  > ⚠️ config.yaml 필드 누락 — 표준 템플릿 복사 안내:
+  > `cp .claude/scripts/templates/cliproxy-config.yaml ~/CLIProxyAPI/config.yaml`
+  > 현재 세션은 Standard mode로 진행.
+
+### 1.6-3. OAuth 토큰 존재 확인
+
+```bash
+Bash("ls ~/.cli-proxy-api/ 2>/dev/null | wc -l")
+```
+
+- `1` 이상 → 다음 단계
+- `0` → TUI 인증 안내 + Standard 폴백:
+  > ⚠️ OAuth 토큰 없음 — 최초 인증 필요.
+  > 별도 터미널에서 1회 실행: `cd ~/CLIProxyAPI && ./cli-proxy-api` (TUI에서 인증)
+  > 이후 자동화 가능. 현재 세션은 Standard mode로 진행.
+
+### 1.6-4. Health check (이미 실행 중인지)
+
+```bash
+HEALTH=$(curl -s -o /dev/null -w '%{http_code}' \
+  http://localhost:8317/v1/messages \
+  -X POST \
+  -H "Authorization: Bearer codex-hybrid-team" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":10,"messages":[{"role":"user","content":"ok"}]}' \
+  --connect-timeout 2 || echo fail)
+
+case "$HEALTH" in
+  200|201|401) echo "already_running" ;;  # 401 = 잘못된 key지만 서버는 동작 중 (정상)
+  *) echo "not_running" ;;
+esac
+```
+
+- `already_running` → 1.6-6 스킵, 1.6-7로 바로
+- `not_running` → 1.6-5 기동
+
+### 1.6-5. 백그라운드 기동
+
+```bash
+Bash("cd ~/CLIProxyAPI && nohup ./cli-proxy-api > /tmp/cliproxy-$(date +%s).log 2>&1 & disown")
+LOG_PATH=$(ls -t /tmp/cliproxy-*.log 2>/dev/null | head -1)
+echo "CLIProxyAPI 기동 중... 로그: $LOG_PATH"
+```
+
+Lead는 `disown`으로 프록시 프로세스를 세션 종료에 묶지 않음 (다음 세션 재사용 위해).
+
+### 1.6-6. Health check 재시도 루프 (최대 10초)
+
+```bash
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8317/v1/messages \
+    -X POST -H "Authorization: Bearer codex-hybrid-team" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"claude-sonnet-4-6","max_tokens":10,"messages":[{"role":"user","content":"ok"}]}' \
+    --connect-timeout 1 2>/dev/null)
+  case "$CODE" in
+    200|201|401) echo "ready"; break ;;
+  esac
+  sleep 1
+done
+```
+
+- `ready` → 1.6-7 진행
+- 10초 초과 → Standard mode 폴백 + 로그 경로 안내:
+  > ⚠️ CLIProxyAPI 기동 실패 (10초 타임아웃). 로그: `{LOG_PATH}`
+  > 일반적 원인: OAuth 토큰 만료 · config.yaml 오류 · 포트 충돌
+  > 현재 세션은 Standard mode로 진행.
+
+### 1.6-7. tmux 세션 env 설정 (CRITICAL — Lead env 격리)
+
+```bash
+SESSION=$(tmux display-message -p '#S')
+tmux set-environment -t "$SESSION" ANTHROPIC_BASE_URL http://localhost:8317
+tmux set-environment -t "$SESSION" ANTHROPIC_AUTH_TOKEN codex-hybrid-team
+tmux set-environment -t "$SESSION" MAX_THINKING_TOKENS 16384
+```
+
+**⚠️ CRITICAL: Lead process env 오염 방지**
+- 이 명령은 tmux **세션 env**만 설정합니다 (세션에 등록된 future pane이 상속).
+- **Lead 자신의 process env는 건드리지 않습니다** — 이미 시작된 Lead 프로세스는 세션 env 변경과 무관.
+- 만약 `export ANTHROPIC_BASE_URL=...`을 Lead shell에 직접 쓰면 Opus 응답이 GPT-5.4로 라우팅되는 대형 사고 발생. **절대 금지.**
+
+### 1.6-8. 캐시 업데이트
+
+```
+.team-os/.env-verified JSON 파일에 swarm 블록 추가:
+{
+  "swarm": {
+    "cliproxy_binary_ok": true,
+    "cliproxy_config_ok": true,
+    "oauth_ok": true,
+    "last_health_check": "{ISO timestamp}",
+    "session_env_set": true
+  }
+}
+```
+
+다음 세션에서 동일 tmux 세션이면 1.6-1~1.6-3 스킵 (1.6-4 health check만 실행).
+
+### 1.6-9. 사용자 요약 배너
+
+```
+> ✅ CLIProxyAPI Swarm Mode 준비 완료
+>
+> | 항목 | 상태 |
+> |---|---|
+> | 바이너리 | ~/CLIProxyAPI/cli-proxy-api ✓ |
+> | 포트 | localhost:8317 ✓ |
+> | Alias 매핑 | claude-sonnet-4-6 → gpt-5.4 ✓ |
+> | OAuth 토큰 | ~/.cli-proxy-api/ ✓ |
+> | tmux 세션 env | ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, MAX_THINKING_TOKENS=16384 (high) |
+>
+> STEP 7-4-1에서 비코딩 워커 {N}명이 split pane으로 스폰되고 GPT-5.4로 라우팅됩니다.
+```
 
 ---
 
@@ -452,6 +681,8 @@ codex exec --full-auto "{태스크B}" > /tmp/codex-taskB.log 2>&1 &
 wait
 ```
 
+⚠️ 동일 파일에 대한 병렬 codex exec는 쓰기 충돌로 실패합니다 (R17). 다른 파일 대상일 때만 병렬 실행하세요.
+
 ### DA 실행 (STEP 7-6 / 7-6.5)
 
 ```
@@ -472,6 +703,109 @@ Codex Hybrid v2 모드에서는 DA 선택지를 다음으로 대체:
 - "ON (Codex Adversarial) (Recommended)" — `codex exec`로 DA
 - "ON (Opus)" — Anthropic Opus로 DA (기존 팀원 방식)
 
+### v4.0 핵심: Swarm Mode Override (swarm_activate=true 전용)
+
+> **PHASE 0.5에서 `swarm_activate = true`로 판정됐을 때만 실행.** Standard mode에서는 위 v2.1 라우팅을 그대로 사용합니다.
+
+Swarm Mode가 활성화되면 tofu-at STEP 7-4-1의 스폰 로직을 다음 3-way 결정 트리로 **오버라이드**합니다. 비코딩 워커 경로가 Anthropic Direct → CLIProxyAPI split pane으로 전환되고, DA는 다시 진짜 teammate로 부활합니다.
+
+```
+FOR EACH role in PLAN.roles:
+
+  IF role.task_type == "coding":
+    # v3 경로 그대로 — codex exec 직접 (proxy 우회, 67초/워커)
+    Bash("codex exec --full-auto '{role.prompt}' > /tmp/codex-{role.name}.log 2>&1 &")
+    → Lead가 로그 파일 tail로 완료 감지 + TEAM_PROGRESS.md 업데이트
+    → tmux pane 생성 안 함, TeamCreate teammate slot 사용 안 함
+
+  ELIF role.task_type == "noncoding":
+    # v1 경로 부활 — Agent 스폰 via tmux pane (CLIProxyAPI 라우팅)
+    # PHASE 1.6에서 이미 tmux 세션 env가 설정됨:
+    #   ANTHROPIC_BASE_URL=http://localhost:8317
+    #   ANTHROPIC_AUTH_TOKEN=codex-hybrid-team
+    #   MAX_THINKING_TOKENS=16384  (high effort)
+    # 새 pane이 세션 env를 상속 → Claude Code가 proxy로 라우팅 → gpt-5.4로 alias
+
+    Task(
+      name: role.name,
+      subagent_type: "general-purpose",
+      model: "sonnet",  # CLIProxyAPI alias에 의해 gpt-5.4로 변환
+      team_name: TEAM_NAME,
+      run_in_background: true,
+      mode: "bypassPermissions",
+      prompt: <spawn_prompt_with_progress_rule>
+    )
+    Write(".team-os/spawn-prompts/{role.name}.md", spawn_prompt)
+
+  ELIF role.task_type == "DA":
+    # v1 경로 부활 — DA를 진짜 teammate로 스폰 (SendMessage 장기 대화 가능)
+    # DA는 모든 비코딩 워커 스폰 완료 이후 맨 마지막에 스폰 (tmux env 순서 이슈)
+    # xhigh effort로 reasoning 강화
+
+    Bash("tmux set-environment -t $SESSION MAX_THINKING_TOKENS 31999")
+    Task(
+      name: "devils-advocate",
+      subagent_type: "general-purpose",
+      model: "sonnet",  # CLIProxyAPI → gpt-5.4 (xhigh reasoning)
+      team_name: TEAM_NAME,
+      run_in_background: true,
+      mode: "bypassPermissions",
+      prompt: <DA_adversarial_prompt_with_SendMessage_protocol>
+    )
+```
+
+**스폰 순서 규칙 (CRITICAL)**
+
+tmux 세션 env는 **새로 생성되는 pane만** 상속합니다. 따라서 순서가 중요합니다:
+
+```
+1. (PHASE 1.6에서 이미 완료) 세션 env 세팅: MAX_THINKING_TOKENS=16384 (high)
+2. 모든 coding 태스크 → codex exec 백그라운드 (tmux pane 안 만들어서 env 무관)
+3. 모든 noncoding 워커 → 한 번에 Task() 병렬 스폰 (전부 high effort 상속)
+4. tmux set-environment 업데이트: MAX_THINKING_TOKENS=31999 (xhigh)
+5. DA 워커 → Task() 스폰 (xhigh effort 상속)
+6. 이후 STEP 7-5부터 결과 수집
+```
+
+**DA ↔ Lead SendMessage 프로토콜 (Swarm 모드 전용)**
+
+Swarm 모드에서 DA는 `codex exec` 일회성 호출이 아니라 진짜 teammate입니다. Lead와 SendMessage로 장기 대화 가능:
+
+```
+STEP 7-6 per-worker review:
+  FOR EACH worker_result received:
+    SendMessage({
+      type: "request",
+      to: "devils-advocate",
+      content: "다음 워커 결과 검토 + 반론 제시:\n\n
+                워커: {worker_name}\n
+                결과 요약: {summary}\n\n
+                반드시 포함: 위험성 · 누락된 관점 · 검증 필요 가정",
+      summary: "DA review request"
+    })
+    → DA teammate 응답 수신 → Lead 통합 → TEAM_FINDINGS.md 기록
+
+STEP 7-6.5 comprehensive review:
+  SendMessage(devils-advocate, "전체 결과 종합 검토 + 재작업 대상 식별")
+  → DA 응답에 따라:
+     · ACCEPTABLE → 전원 100% → PHASE 4
+     · CONCERN → 재작업 대상에게 SendMessage 피드백 → 재실행
+     · 2분 타임아웃 → v3 adversarial-review --scope working-tree 폴백 (안전장치)
+```
+
+**부분 폴백 (Partial Fallback) — worker 단위 격리**
+
+Swarm 활성화 상태에서 일부 워커만 실패하는 경우, 전체 모드를 포기하지 않고 해당 워커만 Standard 경로로 재스폰:
+
+```
+IF 워커 A, B는 Swarm 경로로 정상 heartbeat 수신 + 워커 C만 env 상속 실패 (30초 내 첫 heartbeat 없음):
+  → 워커 A, B는 Swarm 경로 유지
+  → 워커 C만 tmux session env 무시하고 Anthropic Direct로 재스폰 (Agent(...) with stock prompt)
+  → Lead가 혼합 상태를 TEAM_FINDINGS.md에 기록
+```
+
+이는 v1에서 불가능했던 세밀한 복구 메커니즘입니다. v4 전용 이점.
+
 ### 기존 에이전트 통합 (tofu-at Step 5-0에서 자동 처리)
 
 tofu-at의 Step 5-0이 기존 에이전트를 감지하면:
@@ -490,7 +824,35 @@ tofu-at 완료 후 정리:
 curl -s -X POST http://localhost:3747/api/session/clear --connect-timeout 2 || true
 ```
 
-> **v2 간소화:** CLIProxyAPI 종료, tmux 환경변수 제거 불필요
+### 4-S. Swarm 전용 cleanup (v4.0 신규, swarm_activate 시에만)
+
+> **이 서브섹션은 `swarm_activate == true`였을 때만 실행.** Standard mode 세션에서는 스킵 (아래 v2 간소화 참고).
+
+Swarm 모드 세션이 끝나면 다음 세 가지 정리를 수행합니다:
+
+```bash
+# 4-S.1 tmux 세션 env 언셋 (다음 작업 누수 방지 — CRITICAL)
+SESSION=$(tmux display-message -p '#S')
+tmux set-environment -t "$SESSION" -u ANTHROPIC_BASE_URL
+tmux set-environment -t "$SESSION" -u ANTHROPIC_AUTH_TOKEN
+tmux set-environment -t "$SESSION" -u MAX_THINKING_TOKENS
+
+# 4-S.2 CLIProxyAPI 프로세스는 유지 (pkill 금지)
+# → 다음 Swarm 호출 시 health check 통과하면 즉시 재사용 (1.6-4 already_running 경로)
+# → 수동 종료가 필요하면 사용자가 직접: pkill -f cli-proxy-api
+
+# 4-S.3 캐시 업데이트
+# .team-os/.env-verified JSON의 swarm.last_health_check 필드를 현재 시각으로
+# (다음 세션의 1.6-4 health check 짧은 회로)
+```
+
+**⚠️ 4-S.1은 필수**: tmux 세션 env가 남아 있으면 다음 작업(예: 일반 `claude` 호출)이 Swarm 경로로 잘못 라우팅되어 Opus가 GPT-5.4로 실행되는 사고 발생. 반드시 언셋.
+
+**4-S.2는 의도적으로 프로세스 유지**: 다음 세션에서 health check 1회로 재사용되어 PHASE 1.6.5 (기동) 단계를 스킵할 수 있음. 기동에는 보통 2~5초 소요되므로 장기간 유휴 비용보다 재사용 이득이 큽니다.
+
+### 4. Standard mode cleanup (기존 v2/v3 경로)
+
+> **v2 간소화 (Standard mode 기준):** CLIProxyAPI 종료, tmux 환경변수 제거 불필요
 > (Workers가 Anthropic Direct이므로 프록시 관련 정리 없음)
 
 ---
@@ -545,3 +907,9 @@ CLIProxyAPI는 더 이상 필요 없지만 삭제하지 않아도 됩니다.
 | Workers | Anthropic Direct — extended thinking, prompt caching 정상 작동 |
 | 비용 | Workers: Anthropic API 비용. DA: Codex 사용량 (ChatGPT 구독 내) |
 | `codex review` | diff 기반만 지원. 전체 파일 리뷰는 `codex exec` 사용 |
+
+
+## Auto-Learned Patterns
+
+- [2026-04-03] tofu-at-codex v3.0 R11-R17 실험에서 DA 역할을 adversarial reviewer로 명확히 분리해야 품질 검증 루프가 작동한다 (source: 2026-04-03-1424.md)
+- [2026-04-03] tofu-at-codex 커맨드는 세션 간에 codex exec 인증 상태를 별도로 관리해야 한다 — 재시작 시 v1→v2 마이그레이션 절차 필수 (source: 2026-04-03-1301.md)

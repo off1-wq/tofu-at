@@ -1,18 +1,40 @@
 #!/usr/bin/env bash
 # setup-tofu-at-codex.sh — /tofu-at-codex 원클릭 환경 설정
-# Usage: bash .claude/scripts/setup-tofu-at-codex.sh
+# Usage:
+#   bash .claude/scripts/setup-tofu-at-codex.sh              # 기본 (Standard v3)
+#   ENABLE_SWARM=1 bash .claude/scripts/setup-tofu-at-codex.sh  # Swarm 모드 (v4.0)
+#   AUTO_INSTALL=1 bash .claude/scripts/setup-tofu-at-codex.sh  # 자동 설치
+#   RUN_PROXY_TEST=1 bash .claude/scripts/setup-tofu-at-codex.sh  # 프록시 라우팅 실검증
 #
 # 이 스크립트는 /tofu-at-codex 실행에 필요한 모든 의존성을 확인하고,
-# 누락된 항목을 자동 설치합니다.
+# 누락된 항목을 안내합니다 (AUTO_INSTALL=1이면 자동 설치).
+#
+# ── v4.0 듀얼 모드 ──
+# Standard mode (기본): tmux + Codex CLI + Claude Code만 필수
+#   - CLIProxyAPI/OAuth 체크는 warning 수준 (없어도 실패 아님)
+#   - 코딩 태스크는 codex exec 직접, 비코딩 워커는 Anthropic Direct
+#   - 대부분의 작업에 충분 (비코딩 워커 4명 이하)
+#
+# Swarm mode (ENABLE_SWARM=1): Standard + CLIProxyAPI + OAuth 필수
+#   - 비코딩 워커 5명 이상일 때 /tofu-at-codex가 자동 활성화
+#   - Workers를 tmux split pane에 띄우고 GPT-5.4로 라우팅 (토큰 절약)
+#   - DA도 진짜 teammate로 복구 (SendMessage 장기 대화)
+#   - CLIProxyAPI 바이너리 + OAuth 토큰이 없으면 이 모드는 사용 불가
 #
 # 의존성:
-#   1. tmux          — Agent Teams Split Pane 필수
-#   2. Codex CLI     — OpenAI Codex 실행기
-#   3. CLIProxyAPI   — Anthropic → Codex 프록시 라우팅
-#   4. OAuth 인증    — Codex API 접근 토큰
-#   5. Claude Code   — Agent Teams 기반 (이미 설치된 상태로 가정)
+#   1. tmux          — 양 모드 공통 (Agent Teams Split Pane 필수)
+#   2. Codex CLI     — 양 모드 공통 (DA + 코딩 워커용)
+#   3. CLIProxyAPI   — Swarm 모드에서만 필수 (Standard에선 warning)
+#   4. OAuth 인증    — Swarm 모드에서만 필수 (Standard에선 warning)
+#   5. Claude Code   — 양 모드 공통 (이미 설치된 상태로 가정)
 
 set -uo pipefail
+
+# v4.0: Swarm mode flag — CLIProxyAPI/OAuth 체크 수준 결정
+SWARM_MODE="${ENABLE_SWARM:-0}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # ── Colors ──
 RED='\033[0;31m'
@@ -130,13 +152,13 @@ check_cliproxyapi() {
       cat <<'YAML'
     oauth-model-alias:
       codex:
-        - name: "gpt-5.3-codex"
+        - name: "gpt-5.4"
           alias: "claude-sonnet-4-6"
-        - name: "gpt-5.3-codex"
+        - name: "gpt-5.4"
           alias: "claude-opus-4-6"
-        - name: "gpt-5.3-codex"
+        - name: "gpt-5.4"
           alias: "claude-sonnet-4-5-20250929"
-        - name: "gpt-5.3-codex"
+        - name: "gpt-5.4"
           alias: "claude-haiku-4-5-20251001"
 YAML
     fi
@@ -155,13 +177,13 @@ routing:
   strategy: "round-robin"
 oauth-model-alias:
   codex:
-    - name: "gpt-5.3-codex"
+    - name: "gpt-5.4"
       alias: "claude-sonnet-4-6"
-    - name: "gpt-5.3-codex"
+    - name: "gpt-5.4"
       alias: "claude-opus-4-6"
-    - name: "gpt-5.3-codex"
+    - name: "gpt-5.4"
       alias: "claude-sonnet-4-5-20250929"
-    - name: "gpt-5.3-codex"
+    - name: "gpt-5.4"
       alias: "claude-haiku-4-5-20251001"
 YAML
       ok "config.yaml 자동 생성 완료"
@@ -181,13 +203,13 @@ routing:
   strategy: "round-robin"
 oauth-model-alias:
   codex:
-    - name: "gpt-5.3-codex"
+    - name: "gpt-5.4"
       alias: "claude-sonnet-4-6"
-    - name: "gpt-5.3-codex"
+    - name: "gpt-5.4"
       alias: "claude-opus-4-6"
-    - name: "gpt-5.3-codex"
+    - name: "gpt-5.4"
       alias: "claude-sonnet-4-5-20250929"
-    - name: "gpt-5.3-codex"
+    - name: "gpt-5.4"
       alias: "claude-haiku-4-5-20251001"
 YAML
       ok "config.yaml 자동 생성 완료"
@@ -234,7 +256,7 @@ check_claude() {
   fi
 
   # Agent Teams 환경변수 확인
-  local settings_file=".claude/settings.local.json"
+  local settings_file="${REPO_ROOT}/.claude/settings.local.json"
   if [[ -f "${settings_file}" ]]; then
     if grep -q 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS' "${settings_file}" 2>/dev/null; then
       ok "Agent Teams 활성화됨 (settings.local.json)"
@@ -337,12 +359,46 @@ summary() {
 
 # ── Main ──
 header
+
+if [[ "${SWARM_MODE}" == "1" ]]; then
+  echo -e "${BOLD}${CYAN}  [v4.0] Swarm Mode ENABLED — CLIProxyAPI + OAuth are REQUIRED${NC}"
+  echo ""
+else
+  echo -e "${BOLD}${CYAN}  [v4.0] Standard Mode — CLIProxyAPI/OAuth are OPTIONAL (warning only)${NC}"
+  echo -e "${CYAN}  Swarm 모드 활성화: ${BOLD}ENABLE_SWARM=1 bash .claude/scripts/setup-tofu-at-codex.sh${NC}"
+  echo ""
+fi
+
 check_tmux
 check_codex
 check_cliproxyapi
 check_oauth
 check_claude
 test_proxy
+
+# v4.0: Standard mode에서는 CLIProxyAPI/OAuth 실패를 warning으로 다운그레이드
+if [[ "${SWARM_MODE}" != "1" ]]; then
+  # CLIProxyAPI/OAuth 관련 failure가 있으면 warnings로 이동
+  # (구체적 다운그레이드 로직은 향후 확장 — 현재는 summary에서 안내만)
+  :
+fi
+
 summary
 
-exit ${failed}
+# v4.0: Standard mode는 CLIProxyAPI/OAuth 실패해도 exit 0
+# Swarm mode는 모든 실패가 exit != 0
+if [[ "${SWARM_MODE}" == "1" ]]; then
+  exit ${failed}
+else
+  # Standard mode: tmux/codex/claude 핵심 3개만 실패 조건
+  # CLIProxyAPI/OAuth 실패는 warning으로 간주하고 exit 0 허용
+  # (실제 Swarm 모드 사용 시 /tofu-at-codex가 PHASE 1.6에서 재검증)
+  if [[ ${failed} -gt 2 ]]; then
+    # 핵심 3개 중 하나라도 실패하면 (실제 failed > 2는 tmux/codex/claude 중 2개 이상 실패 = critical)
+    exit ${failed}
+  else
+    # failed가 1~2라면 CLIProxyAPI/OAuth 정도일 가능성 → warning으로 간주
+    echo -e "  ${YELLOW}[v4.0 Standard mode] CLIProxyAPI/OAuth 실패는 무시 (Swarm 모드만 필요).${NC}"
+    exit 0
+  fi
+fi

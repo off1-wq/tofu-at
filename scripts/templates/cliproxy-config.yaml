@@ -1,0 +1,70 @@
+# CLIProxyAPI config for Claude Code Hybrid Teams (v4.0 Swarm Mode)
+# Codex (GPT-5.4) proxy for Claude Code teammates
+#
+# Source: standard template restored from v1 (git 4460a935) + v3 improvements
+# Install location: ~/CLIProxyAPI/config.yaml
+# Used by: /tofu-at-codex v4.0 Swarm Mode (noncoding_count >= 5)
+#
+# If your existing config differs, DO NOT overwrite — this is a reference
+# template only. PHASE 1.6 validates required fields (port, alias) against
+# your live config and prompts before any changes.
+
+# Bind to localhost only for security
+host: "127.0.0.1"
+
+# Server port (must match /tofu-at-codex PHASE 1.6 health check)
+port: 8317
+
+# Auth directory for OAuth tokens
+# If empty on first run, run TUI auth once:
+#   cd ~/CLIProxyAPI && ./cli-proxy-api
+auth-dir: "~/.cli-proxy-api"
+
+# API keys for authentication (used by Claude Code teammate via ANTHROPIC_AUTH_TOKEN)
+api-keys:
+  - "codex-hybrid-team"
+
+# Debug logging (set to true for troubleshooting PHASE 1.6 failures)
+debug: false
+
+# Retry on transient errors
+request-retry: 3
+
+# Disable quota cooldown — prevents 1-min client suspension on transient 403
+# Codex API returns 403 on concurrent request limits (not 429),
+# causing CLIProxyAPI to suspend auth for 1 minute unnecessarily.
+# Keep this true for Swarm Mode where 5+ workers hit the proxy concurrently.
+disable-cooling: true
+
+# Routing strategy across multiple Codex accounts (if configured)
+routing:
+  strategy: "round-robin"
+
+# Map Claude model names (sent by Claude Code teammate) → gpt-5.4
+# alias = what Claude Code sends when spawning a teammate
+# name  = actual upstream Codex model routed to
+# This is the core alias map that enables Workers to run as GPT-5.4
+# while Claude Code thinks it is spawning a sonnet/opus teammate.
+oauth-model-alias:
+  codex:
+    - name: "gpt-5.4"
+      alias: "claude-sonnet-4-6"
+    - name: "gpt-5.4"
+      alias: "claude-opus-4-6"
+    - name: "gpt-5.4"
+      alias: "claude-sonnet-4-5-20250929"
+    - name: "gpt-5.4"
+      alias: "claude-haiku-4-5-20251001"
+
+# Reasoning effort for Codex workers
+# CLIProxyAPI's thinking module (apply.go) controls reasoning.effort independently.
+# It translates Anthropic thinking.budget_tokens → Codex reasoning.effort:
+#   ~1024  → low
+#   ~8192  → medium
+#   ~16384 → high    (default for Swarm Workers)
+#   ~31999 → xhigh   (default for Swarm DA)
+#
+# Claude Code Lead controls these via MAX_THINKING_TOKENS env var at spawn time.
+# See /tofu-at-codex v4.0 PHASE 1.6 Step 1.6.7 and STEP 7-4-1 DA branch.
+#
+# When no thinking param is sent, defaults to medium.
