@@ -132,5 +132,5 @@ TeamDelete()
 |------|------|------|
 | `references/lead-templates.md` | Lead/Category Lead 스폰 프롬프트 XML | 2, 3 |
 | `references/worker-templates.md` | 전체 변수 목록 + Worker/Explore/Wrapper/Codex 프롬프트 + 도구 매핑 | 1, 4, 4.5, 5, 6, 8, 9 |
-| `references/expert-db.md` | 27도메인 137명 전문가 DB + resolve_expert() 알고리즘 | 7.5 |
+| `references/expert-db.md` | 30도메인 155명 전문가 DB + resolve_expert() 알고리즘 | 7.5 |
 | `references/ce-checklist.md` | CE 체크리스트 + /prompt 파이프라인 + Claude 전략 + 프롬프트 엔지니어링 | 7, 7.6, 7.7, 7.8, 7.9 |

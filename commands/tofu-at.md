@@ -1008,7 +1008,7 @@ AskUserQuestion 호출 — questions 배열에 1개 질문:
 
 **각 팀원별로 /prompt 파이프라인을 실행하여 고품질 스폰 프롬프트를 생성합니다.**
 **템플릿: `tofu-at-spawn-templates/` 참조 (SKILL.md = 인덱스, references/ = 상세).**
-**전문가 DB: `tofu-at-spawn-templates/references/expert-db.md`에 27도메인 137명 전문가 완전 내장.**
+**전문가 DB: `tofu-at-spawn-templates/references/expert-db.md`에 30도메인 155명 전문가 완전 내장.**
 **파이프라인 상세: `tofu-at-spawn-templates/references/expert-db.md` (내장 DB + 매핑) + `references/ce-checklist.md` (서브스텝) 참조.**
 
 ### 실행 순서 (각 팀원에 대해 반복)
@@ -2351,7 +2351,7 @@ Skill("tofu-at", args: "spawn {team_id}")
 | 스폰 프롬프트 템플릿 | `tofu-at-spawn-templates/` (SKILL.md + references/) |
 | CE 체크리스트 | `context-engineering-collection.md` |
 | /prompt 파이프라인 내재화 | `prompt.md` (목적감지, 요소확장, 전문가토론, CE) |
-| 전문가 도메인 프라이밍 | `tofu-at-spawn-templates/references/expert-db.md` (27도메인 137명 전문가 DB 내장) |
+| 전문가 도메인 프라이밍 | `tofu-at-spawn-templates/references/expert-db.md` (30도메인 155명 전문가 DB 내장) |
 | Claude 최적화 전략 | `claude-4.6-prompt-strategies.md` (default_to_action 등) |
 | Agent Teams 참조 구현 | `knowledge-manager.md` (STEP 3-6) |
 

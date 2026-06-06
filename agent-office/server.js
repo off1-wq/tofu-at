@@ -142,7 +142,9 @@ app.post('/api/team-os/bootstrap', (req, res) => {
 app.post('/api/session/clear', (_req, res) => {
   try {
     const cleared = clearArtifacts();
+    Object.values(_progressTimers).forEach(clearTimeout);
     _progressOverlay = {}; // Clear progress overlay on session clear
+    _progressTimers = {};
     _hookActivity = {};   // Clear hook activity on session clear
     _nativeSuppressed = true; // Suppress native data until new team activity
     invalidateCache();
@@ -155,6 +157,7 @@ app.post('/api/session/clear', (_req, res) => {
 
 // --- Real-time Progress API (overlay) ---
 let _progressOverlay = {};
+let _progressTimers = {};
 
 app.post('/api/progress', (req, res) => {
   res.set('Content-Type', 'application/json; charset=utf-8');
@@ -175,8 +178,12 @@ app.post('/api/progress', (req, res) => {
   };
   broadcast('progress_push', _progressOverlay[agent]);
 
-  // Auto-expire after 10 minutes
-  setTimeout(() => { delete _progressOverlay[agent]; }, 600000);
+  // Auto-expire after 10 minutes — clear any existing timer first to avoid accumulation
+  if (_progressTimers[agent]) clearTimeout(_progressTimers[agent]);
+  _progressTimers[agent] = setTimeout(() => {
+    delete _progressOverlay[agent];
+    delete _progressTimers[agent];
+  }, 600000);
 
   res.json({ success: true });
 });

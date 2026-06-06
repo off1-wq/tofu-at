@@ -93,7 +93,12 @@ fi
 
 # ─── Build Exit Command ────────────────────────────────
 if [ "$AUTO_PUSH" = true ]; then
-  EXIT_CMD="cd $PROJECT_DIR && git add -A && git commit -m 'auto-sync: \$(date +%Y-%m-%d\\ %H:%M)' 2>/dev/null && git pull origin master --rebase 2>/dev/null && git push origin master 2>/dev/null; exec bash"
+  # NOTE: EXIT_CMD is embedded inside tmux's  bash -c '...'  below, which is in
+  # turn inside a double-quoted FUNC_BLOCK. To survive both quoting layers the
+  # commit message must contain NO single quotes and NO spaces (hence the
+  # quote-free ISO timestamp), and the cd path's double quotes are escaped as \"
+  # so they don't terminate tmux's outer double-quoted argument.
+  EXIT_CMD="cd \\\"$PROJECT_DIR\\\" && git add -A && git commit -m auto-sync-\$(date +%Y-%m-%dT%H:%M) 2>/dev/null && git pull origin master --rebase 2>/dev/null && git push origin master 2>/dev/null; exec bash"
 else
   EXIT_CMD="exec bash"
 fi
@@ -149,7 +154,7 @@ ai() {
     claude_cmd=\"claude --model=opus[1m] --dangerously-skip-permissions\"
   fi
   _ai_setup
-  tmux new-session -s claude \"bash -c 'cd $PROJECT_DIR && \$claude_cmd; $EXIT_CMD'\"
+  tmux new-session -s claude \"bash -c 'cd \\\"$PROJECT_DIR\\\" && \$claude_cmd; $EXIT_CMD'\"
 }
 
 # --- ain: Launch named Claude Code session/window ---
@@ -165,7 +170,7 @@ ain() {
   fi
   local name=\"\${1:-claude-\$(date +%H%M)}\"
   _ai_setup
-  local cmd=\"bash -c 'cd $PROJECT_DIR && \$claude_cmd; $EXIT_CMD'\"
+  local cmd=\"bash -c 'cd \\\"$PROJECT_DIR\\\" && \$claude_cmd; $EXIT_CMD'\"
   if [ -n \"\$TMUX\" ]; then
     tmux new-window -n \"\$name\" \"\$cmd\"
   else

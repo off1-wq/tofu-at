@@ -59,7 +59,7 @@ function synthesizePlan(nativeTeam, artifactPlan) {
     if (nativeTeam?.config?.members && artifactPlan.team) {
       for (const member of artifactPlan.team) {
         const native = nativeTeam.config.members.find(m =>
-          m.name === (member.name || '').replace('@', '')
+          m.name === (member.name || '').replace(/^@/, '')
         );
         if (native) {
           member._isActive = native.isActive;
@@ -148,7 +148,7 @@ function synthesizeProgress(nativeTeam, artifactProgress) {
   if (artifactProgress && !artifactProgress.isEmpty && artifactProgress.agents?.length > 0) {
     if (nativeTeam?.config?.members) {
       for (const agent of artifactProgress.agents) {
-        const cleanName = (agent.agent || '').replace('@', '');
+        const cleanName = (agent.agent || '').replace(/^@/, '');
         const native = nativeTeam.config.members.find(m => m.name === cleanName);
         if (native) {
           agent._isActive = native.isActive;
@@ -160,7 +160,7 @@ function synthesizeProgress(nativeTeam, artifactProgress) {
     // Merge task-based progress (higher value wins)
     if (nativeTeam?.tasks?.length > 0) {
       for (const agent of artifactProgress.agents) {
-        const cleanName = (agent.agent || '').replace('@', '');
+        const cleanName = (agent.agent || '').replace(/^@/, '');
         const taskProg = calculateTaskProgress(nativeTeam.tasks, cleanName);
         if (taskProg && taskProg.progress > (agent.progress || 0)) {
           agent.progress = taskProg.progress;

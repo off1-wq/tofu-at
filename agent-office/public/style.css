@@ -619,6 +619,28 @@ body::before {
   margin-left: auto;
 }
 
+/* Live hook activity indicator in the Hooks card header */
+.hook-live {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--status-active);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 120px;
+  text-overflow: ellipsis;
+  margin-left: 8px;
+}
+.hook-live.pulsing {
+  opacity: 1;
+  animation: hookLivePulse 1.4s ease-in-out infinite;
+}
+@keyframes hookLivePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 .card-body {
   flex: 1;
   overflow-y: auto;

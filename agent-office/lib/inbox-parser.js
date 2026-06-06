@@ -81,11 +81,12 @@ function inferAgentStatus(agentName, allInboxes) {
     return parsed.type === 'shutdown_request';
   });
 
-  // Check for results sent to lead (agent completed work)
+  // Check for results sent to lead (agent completed work).
+  // Deliberately excludes text.length > 500 — long status updates are not results.
   const hasResults = fromAgent.length > 0 && fromAgent.some(m => {
     const text = (m.text || '').toLowerCase();
     return text.includes('완료') || text.includes('결과') || text.includes('분석') ||
-           text.includes('completed') || text.includes('result') || text.length > 500;
+           text.includes('completed') || text.includes('result');
   });
 
   // Check for RALPH/REVISE waiting (lead sent REVISE back)
@@ -190,8 +191,8 @@ function generateBulletinFromInboxes(allInboxes) {
       if ((msg.text || '').length < 20) continue;
 
       const ts = msg.timestamp ? new Date(msg.timestamp) : new Date();
-      const timeStr = ts.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-      const dateStr = ts.toLocaleDateString('sv-SE');
+      const timeStr = ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+      const dateStr = ts.toLocaleDateString('sv-SE'); // ISO-style date (YYYY-MM-DD) for bulletin headers
 
       entries.push({
         time: `${dateStr} ${timeStr}`,

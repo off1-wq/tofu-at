@@ -131,22 +131,15 @@ process.stdin.on("end", () => {
       }
     }
 
-    // Agent has posted — check if idle count is escalating despite having entries
-    if (newCount >= 3) {
-      // Even with bulletin entries, 3+ consecutive idles suggests stuck agent
-      console.error(
-        `[teammate-idle-gate] WARNING: ${agentName} idle ${newCount} consecutive times despite having ${matches.length} bulletin entries. May need attention.`
-      );
-      // Still allow — agent has been productive
-    }
-
-    // Reset idle count if agent has recent activity (bulletin entries exist)
-    // This prevents false escalation for agents that are genuinely between tasks
+    // Agent has posted to bulletin — reset idle count so they don't get
+    // falsely escalated just for going idle between tasks.
+    idleCounts[agentName] = 0;
+    writeIdleCounts(idleCounts);
 
     console.log(
       JSON.stringify({
         decision: "allow",
-        reason: `${agentName} has ${matches.length} bulletin entries (idle #${newCount})`,
+        reason: `${agentName} has ${matches.length} bulletin entries. Idle count reset.`,
       })
     );
     process.exit(0);

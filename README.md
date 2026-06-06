@@ -48,7 +48,7 @@ curl -fsSL https://raw.githubusercontent.com/treylom/tofu-at/main/install.sh | b
 
 - **동적 리소스 스캔** — 스킬, 에이전트, MCP 서버, CLI 도구 자동 발견
 - **워크플로우 분석** — 병렬화 가능한 에이전트 단위로 자동 분해
-- **전문가 도메인 프라이밍** — 27개 도메인, 137명의 전문가 페르소나 내장
+- **전문가 도메인 프라이밍** — 30개 도메인, 155명의 전문가 페르소나 내장
 - **Ralph Loop** — 반복적 리뷰-피드백-재작업 품질 보장 사이클
 - **Devil's Advocate** — 팀 전체 일관성을 위한 교차 리뷰
 - **3계층 공유 메모리** — Markdown + SQLite WAL + MCP Memory
@@ -231,7 +231,7 @@ bash setup-bashrc.sh ~/my-project --shell=zsh        # zsh 사용자
     |
     +-- tofu-at-spawn-templates.md  (스폰 프롬프트)
           - Lead / Category Lead / Worker 템플릿
-          - 전문가 도메인 프라이밍 (137명)
+          - 전문가 도메인 프라이밍 (155명)
           - /prompt 파이프라인 연동
           - CE 최적화 체크리스트
 
@@ -388,7 +388,7 @@ The installer handles everything: prerequisite checks, file copying, `settings.l
 
 - **Dynamic Resource Scanning** — Auto-discovers skills, agents, MCP servers, CLI tools
 - **Workflow Analysis** — Breaks down workflows into parallelizable agent units
-- **Expert Domain Priming** — 27 domains, 137 experts embedded for role-based prompts
+- **Expert Domain Priming** — 30 domains, 155 experts embedded for role-based prompts
 - **Ralph Loop** — Iterative review-feedback-rework cycle for quality assurance
 - **Devil's Advocate** — Cross-cutting review for team-wide consistency
 - **3-Layer Shared Memory** — Markdown + SQLite WAL + MCP Memory
@@ -570,7 +570,7 @@ Saves/updates a team configuration in `.team-os/registry.yaml`.
     |
     +-- tofu-at-spawn-templates.md  (spawn prompts)
           - Lead / Category Lead / Worker templates
-          - Expert Domain Priming (137 experts)
+          - Expert Domain Priming (155 experts)
           - /prompt pipeline integration
           - CE optimization checklist
 

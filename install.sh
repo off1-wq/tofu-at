@@ -9,6 +9,10 @@
 
 set -e
 
+# Cleanup temp dir on exit (handles both success and error paths)
+TEMP=""
+trap '[ -n "$TEMP" ] && rm -rf "$TEMP"' EXIT
+
 VERSION="2.2.0"
 REPO="https://github.com/treylom/tofu-at"
 TOTAL_STEPS=7
@@ -604,10 +608,6 @@ main() {
   verify_installation
   print_summary
 
-  # Cleanup temp directory
-  if [ "$CLEANUP" = true ] && [ -n "$TEMP" ]; then
-    rm -rf "$TEMP"
-  fi
 }
 
 main "$@"

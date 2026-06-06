@@ -1695,6 +1695,23 @@ function connectSSE() {
         flashCard('card-metrics');
       }
 
+      // Live hook activity (PostToolUse) — high-frequency, so flash the Hooks
+      // card and update the live indicator without a full re-fetch.
+      if (msg.type === 'hook_activity' && msg.data) {
+        flashCard('card-hooks');
+        updateHookLive(msg.data);
+        return;
+      }
+
+      // Hook lifecycle events (agent start/stop, teammate idle, task completed,
+      // session stop) — flash Hooks + Mission Control to reflect team motion.
+      if (msg.type === 'hook_lifecycle' && msg.data) {
+        flashCard('card-hooks');
+        flashMissionControl();
+        updateHookLive({ lastTool: msg.data.event });
+        return;
+      }
+
       // Real-time progress push: update single agent tile + graph node without full re-fetch
       if (msg.type === 'progress_push' && msg.data) {
         // Bootstrap lastKmWorkflow if null (first progress_push before any fetchStatus)
@@ -1760,6 +1777,23 @@ function flashCard(cardId) {
   if (!card) return;
   card.classList.add('updated');
   setTimeout(() => card.classList.remove('updated'), 1500);
+}
+
+// Show a live pulse + last tool/event name in the Hooks card header.
+// Driven by hook_activity / hook_lifecycle SSE events from the server.
+let _hookLiveTimer = null;
+function updateHookLive(data) {
+  const el = document.getElementById('hooks-live');
+  if (!el) return;
+  const label = (data && data.lastTool) ? String(data.lastTool) : 'active';
+  el.textContent = `⚡ ${label}`;
+  el.classList.add('pulsing');
+  if (_hookLiveTimer) clearTimeout(_hookLiveTimer);
+  // Fade the indicator after a few seconds of silence.
+  _hookLiveTimer = setTimeout(() => {
+    el.classList.remove('pulsing');
+    el.textContent = '';
+  }, 4000);
 }
 
 function flashMissionControl() {
