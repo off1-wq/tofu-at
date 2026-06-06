@@ -76,15 +76,17 @@ const CLAUDE_HOME = (HOME_CLAUDE && fs.existsSync(HOME_CLAUDE)) ? HOME_CLAUDE : 
  */
 function getWSLHomes() {
   if (process.platform !== 'win32') return [];
+  // Opt-out: skip WSL probing entirely (fast startup when `wsl` is slow/hangs).
+  if (process.env.AGENT_OFFICE_NO_WSL === '1') return [];
   try {
     const { execSync } = require('child_process');
     // wsl --list outputs UTF-16LE with null bytes between chars — read as buffer then clean
-    const buf = execSync('wsl --list --quiet', { timeout: 5000 });
+    const buf = execSync('wsl --list --quiet', { timeout: 2000 });
     const raw = buf.toString('utf16le').replace(/\r/g, '');
     const distros = raw.split('\n').map(s => s.trim()).filter(s => s.length > 0 && !/^\s*$/.test(s));
     return distros.map(d => {
       try {
-        const home = execSync(`wsl -d ${d} -- bash -c "echo $HOME"`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        const home = execSync(`wsl -d ${d} -- bash -c "echo $HOME"`, { encoding: 'utf-8', timeout: 2000 }).trim();
         // Build UNC path: \\wsl$\{distro}\{home path components}
         const homeParts = home.split('/').filter(Boolean); // ['home', 'tofu']
         const winPath = path.join('\\\\wsl$', d, ...homeParts);
